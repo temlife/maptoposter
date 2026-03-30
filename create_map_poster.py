@@ -848,12 +848,12 @@ def create_poster(
 
     if layout == "top":
         zone_inner, zone_outer = 0.855, 0.930  # inner = closer to map edge
-        sign = 1  # slots go upward (increasing y)
+        sign = 1  # slots go away from map (increasing y)
     else:
         zone_inner, zone_outer = 0.145, 0.060  # inner = closer to map edge
-        sign = -1  # slots go downward (decreasing y)
+        sign = -1  # slots go away from map (decreasing y)
 
-    # Collect active slots as (name, spacing_weight) — city always first
+    # Collect active slots — city always first, then outward
     slots: list[str] = ["city"]
     if show_country:
         slots.append("sep")
@@ -863,19 +863,25 @@ def create_poster(
     if show_coords:
         slots.append("coords")
 
-    # Assign evenly-spaced y positions within the zone
-    n_gaps = max(len(slots) - 1, 1)
-    step = (zone_outer - zone_inner) / n_gaps
+    # Space slots with a preferred step, capped so they fit inside the zone.
+    # The group is *centred* in the zone so that hiding elements shifts the
+    # city name toward the vertical middle rather than leaving it at the edge.
+    PREFERRED_STEP = 0.025
+    zone_width = abs(zone_outer - zone_inner)
+    zone_center = (zone_inner + zone_outer) / 2
+    n = len(slots)
+    step = min(PREFERRED_STEP, zone_width / max(n - 1, 1))
+    first_offset = -(n - 1) / 2 * step  # offset of city from centre
 
     pos: dict[str, float] = {}
     for i, slot in enumerate(slots):
-        pos[slot] = zone_inner + sign * i * abs(step)
+        pos[slot] = zone_center + (first_offset + i * step) * sign
 
-    # Fallback keys so sep/tagline/coords always have a value even if unused
+    # Fallback values for unused slots (separator still needs y_sep)
     y_city = pos["city"]
-    y_sep = pos.get("sep", zone_inner + sign * abs(step))
-    y_country = pos.get("country", zone_inner + sign * 2 * abs(step))
-    y_tagline = pos.get("tagline", y_country + sign * abs(step))
+    y_sep = pos.get("sep", zone_center)
+    y_country = pos.get("country", zone_center + sign * step)
+    y_tagline = pos.get("tagline", zone_center + sign * 2 * step)
     y_coords = pos.get("coords", zone_outer)
 
     ax.text(0.5, y_city, spaced_city,
