@@ -15,6 +15,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import json
 import os
 import threading
+import uuid
 from pathlib import Path
 
 import matplotlib
@@ -29,6 +30,9 @@ app = Flask(__name__)
 
 POSTERS_DIR = Path("posters")
 THEMES_DIR = Path("themes")
+
+# In-memory task store: {task_id: {status, message, progress, results}}
+tasks: dict = {}
 
 
 def load_all_themes():
@@ -89,6 +93,85 @@ def do_generate(params, coords=None, prefetched=None):
 
 
 # ---------------------------------------------------------------------------
+# Background task runner
+# ---------------------------------------------------------------------------
+
+def _run_task(task_id: str, data: dict) -> None:
+    """Run poster generation in a background thread, updating task progress."""
+    task = tasks[task_id]
+
+    def upd(**kw: object) -> None:
+        task.update(kw)
+
+    try:
+        upd(status="running", message="Resolving coordinates…", progress=0.05)
+
+        from lat_lon_parser import parse as parse_coord
+        city = data["city"]
+        country = data["country"]
+
+        if data.get("latitude") and data.get("longitude"):
+            coords = (parse_coord(data["latitude"]), parse_coord(data["longitude"]))
+        else:
+            coords = cmp.get_coordinates(city, country)
+
+        themes_to_run = (
+            list(load_all_themes().keys()) if data.get("all_themes")
+            else [data.get("theme", "terracotta")]
+        )
+        n = len(themes_to_run)
+
+        upd(message="Fetching map data…", progress=0.15)
+
+        if n > 1:
+            dist = int(data.get("distance", 18000))
+            width = float(data.get("width", 12))
+            height = float(data.get("height", 16))
+            comp_dist = dist * (max(height, width) / min(height, width)) / 4
+            prefetched = cmp.fetch_map_data(coords, comp_dist)
+        else:
+            prefetched = None
+
+        results: list = []
+
+        if n > 1:
+            workers = min(4, n)
+            upd(message=f"Rendering {n} themes in parallel…", progress=0.35)
+            with ThreadPoolExecutor(max_workers=workers) as executor:
+                futures = {
+                    executor.submit(do_generate, {**data, "theme": tk}, coords, prefetched): tk
+                    for tk in themes_to_run
+                }
+                done = 0
+                for future in as_completed(futures):
+                    tk = futures[future]
+                    done += 1
+                    upd(progress=0.35 + 0.6 * done / n, message=f"Rendered {done}/{n} themes…")
+                    try:
+                        out = future.result()
+                        results.append({"theme": tk, "file": os.path.basename(out)})
+                    except Exception as exc:
+                        results.append({"theme": tk, "error": str(exc)})
+        else:
+            upd(message="Rendering poster…", progress=0.35)
+            try:
+                out = do_generate({**data, "theme": themes_to_run[0]}, coords)
+                results.append({"theme": themes_to_run[0], "file": os.path.basename(out)})
+                upd(progress=0.95)
+            except Exception as exc:
+                results.append({"theme": themes_to_run[0], "error": str(exc)})
+
+        ok = sum(1 for r in results if "error" not in r)
+        summary = f"{ok} poster{'s' if ok != 1 else ''} generated"
+        if ok < n:
+            summary += f", {n - ok} failed"
+        upd(status="done", progress=1.0, message=summary, results=results)
+
+    except Exception as exc:
+        task.update({"status": "error", "message": str(exc), "progress": 1.0})
+
+
+# ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
 
@@ -104,46 +187,18 @@ def api_generate():
     if not data or not data.get("city") or not data.get("country"):
         return jsonify({"error": "City and Country are required."}), 400
 
-    themes_to_run = list(load_all_themes().keys()) if data.get("all_themes") else [data.get("theme", "terracotta")]
-    results = []
+    task_id = uuid.uuid4().hex[:8]
+    tasks[task_id] = {"status": "pending", "message": "Starting…", "progress": 0.0, "results": None}
+    threading.Thread(target=_run_task, args=(task_id, data), daemon=True).start()
+    return jsonify({"task_id": task_id})
 
-    if len(themes_to_run) > 1:
-        # Resolve coords and fetch OSM data once, then render all themes in parallel
-        from lat_lon_parser import parse as parse_coord
-        city = data["city"]
-        country = data["country"]
-        if data.get("latitude") and data.get("longitude"):
-            coords = (parse_coord(data["latitude"]), parse_coord(data["longitude"]))
-        else:
-            coords = cmp.get_coordinates(city, country)
 
-        dist = int(data.get("distance", 18000))
-        width = float(data.get("width", 12))
-        height = float(data.get("height", 16))
-        compensated_dist = dist * (max(height, width) / min(height, width)) / 4
-        prefetched = cmp.fetch_map_data(coords, compensated_dist)
-
-        workers = min(4, len(themes_to_run))
-        with ThreadPoolExecutor(max_workers=workers) as executor:
-            futures = {
-                executor.submit(do_generate, {**data, "theme": t}, coords, prefetched): t
-                for t in themes_to_run
-            }
-            for future in as_completed(futures):
-                theme_key = futures[future]
-                try:
-                    output_file = future.result()
-                    results.append({"theme": theme_key, "file": os.path.basename(output_file)})
-                except Exception as e:
-                    results.append({"theme": theme_key, "error": str(e)})
-    else:
-        try:
-            output_file = do_generate({**data, "theme": themes_to_run[0]})
-            results.append({"theme": themes_to_run[0], "file": os.path.basename(output_file)})
-        except Exception as e:
-            results.append({"theme": themes_to_run[0], "error": str(e)})
-
-    return jsonify({"results": results})
+@app.route("/api/task/<task_id>")
+def get_task(task_id: str):
+    task = tasks.get(task_id)
+    if task is None:
+        return jsonify({"error": "Task not found"}), 404
+    return jsonify(task)
 
 
 @app.route("/posters/<path:filename>")
@@ -161,6 +216,8 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>MapToPoster</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 :root{
@@ -214,9 +271,15 @@ input:focus,select:focus{border-color:var(--accent)}
 .chip:hover{border-color:var(--accent)}
 .chip.active{border-color:var(--accent);background:color-mix(in srgb,var(--accent) 8%,transparent)}
 .dot{width:13px;height:13px;border-radius:50%;flex-shrink:0;border:1.5px solid rgba(0,0,0,.15)}
-.theme-preview{margin-top:6px;border-radius:var(--r);overflow:hidden;
-               border:1px solid var(--border);transition:all .25s}
-.theme-hint{font-size:.7rem;color:var(--muted);margin-top:4px;min-height:1.1em;line-height:1.35}
+.theme-hint{font-size:.7rem;color:var(--muted);margin-top:4px;line-height:1.35}
+.chip{position:relative}
+.chip-tip{
+  position:absolute;left:50%;bottom:calc(100% + 8px);transform:translateX(-50%);
+  width:80px;background:var(--surface);border:1px solid var(--border);
+  border-radius:var(--r);overflow:hidden;box-shadow:0 4px 14px rgba(0,0,0,.18);
+  opacity:0;pointer-events:none;transition:opacity .15s;z-index:100;
+}
+.chip:hover .chip-tip{opacity:1}
 
 /* Advanced */
 details.adv{border:1px solid var(--border);border-radius:var(--r);overflow:hidden}
@@ -301,6 +364,9 @@ details.adv .adv-body{padding:12px;display:flex;flex-direction:column;gap:10px}
 .lb-close:hover{opacity:1}
 .lb-dl{position:absolute;bottom:20px;right:24px}
 
+/* Map picker */
+#coord-map{height:200px;border-radius:var(--r);border:1px solid var(--border);margin-top:4px;z-index:0}
+
 /* Responsive */
 @media(max-width:760px){
   body{flex-direction:column}
@@ -359,7 +425,6 @@ details.adv .adv-body{padding:12px;display:flex;flex-direction:column;gap:10px}
       {% endfor %}
     </div>
     <div class="theme-hint" id="theme-hint">{{ themes.get('terracotta',{}).get('description','') }}</div>
-    <div class="theme-preview" id="theme-preview"></div>
   </div>
 
   <!-- Advanced options (collapsed by default) -->
@@ -380,14 +445,24 @@ details.adv .adv-body{padding:12px;display:flex;flex-direction:column;gap:10px}
           <option value="pdf">PDF (print)</option>
         </select>
       </div>
-      <!-- Custom coordinates -->
-      <div class="row">
-        <div class="field"><label for="latitude">Latitude</label>
-          <input id="latitude" type="text" placeholder="e.g. 48.8566"></div>
-        <div class="field"><label for="longitude">Longitude</label>
-          <input id="longitude" type="text" placeholder="e.g. 2.3522"></div>
+      <!-- Map picker -->
+      <div class="field">
+        <label>Center Point</label>
+        <div id="coord-map"></div>
+        <div class="row" style="margin-top:6px">
+          <div class="field"><label for="latitude">Latitude</label>
+            <input id="latitude" type="text" placeholder="auto-detect"></div>
+          <div class="field"><label for="longitude">Longitude</label>
+            <input id="longitude" type="text" placeholder="auto-detect"></div>
+        </div>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-top:2px">
+          <div class="hint">Click the map to pin the poster center, or leave blank to geocode from the city name.</div>
+          <button type="button" onclick="clearCoords()"
+                  style="font-size:.7rem;color:var(--muted);background:none;border:none;cursor:pointer;text-decoration:underline;padding:0;flex-shrink:0;margin-left:8px">
+            Clear
+          </button>
+        </div>
       </div>
-      <div class="hint">Leave blank to auto-detect coordinates from city name.</div>
       <!-- Display names (i18n) -->
       <div class="field"><label for="display_city">Custom city label on poster</label>
         <input id="display_city" type="text" placeholder="e.g. 東京 for Tokyo"></div>
@@ -478,12 +553,19 @@ function selectTheme(key) {
   document.querySelectorAll('.chip').forEach(c => c.classList.toggle('active', c.dataset.key === key));
   const t = T[key];
   document.getElementById('theme-hint').textContent = (t && t.description) || '';
-  if (t) document.getElementById('theme-preview').innerHTML = buildPreview(t);
 }
 
-document.querySelectorAll('.chip').forEach(chip =>
-  chip.addEventListener('click', () => selectTheme(chip.dataset.key))
-);
+document.querySelectorAll('.chip').forEach(chip => {
+  chip.addEventListener('click', () => selectTheme(chip.dataset.key));
+  // Inject hover preview tooltip
+  const t = T[chip.dataset.key];
+  if (t) {
+    const tip = document.createElement('div');
+    tip.className = 'chip-tip';
+    tip.innerHTML = buildPreview(t);
+    chip.appendChild(tip);
+  }
+});
 selectTheme('terracotta');
 
 function getTheme() {
@@ -503,7 +585,7 @@ function closeLightbox() {
 }
 document.addEventListener('keydown', e => { if (e.key === 'Escape') closeLightbox(); });
 
-/* Generate */
+/* Generate — non-blocking: starts a background task, then polls for status */
 async function generate(allThemes) {
   const city = document.getElementById('city').value.trim();
   const country = document.getElementById('country').value.trim();
@@ -530,14 +612,12 @@ async function generate(allThemes) {
   btnGen.disabled = btnAll.disabled = true;
   btnGen.innerHTML = '<span class="spin"></span> Generating…';
 
-  const progress = document.getElementById('progress');
   const fill = document.getElementById('prog-fill');
   const progText = document.getElementById('prog-text');
-
+  const progress = document.getElementById('progress');
   progress.style.display = 'block';
-  fill.style.width = '15%';
-  fill.classList.add('pulse');
-  progText.textContent = 'Fetching map data… (30–60 s for a new city)';
+  fill.style.width = '5%';
+  progText.textContent = 'Starting…';
   document.getElementById('result').innerHTML = '';
   progress.scrollIntoView({behavior:'smooth', block:'center'});
 
@@ -545,56 +625,107 @@ async function generate(allThemes) {
     const resp = await fetch('/api/generate', {
       method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(payload)
     });
-    fill.classList.remove('pulse');
-    fill.style.width = '100%';
-
     if (!resp.ok) {
-      const msg = (await resp.json()).error || 'Unknown error';
+      const msg = (await resp.json()).error || 'Server error';
       progText.textContent = 'Error: ' + msg;
       toast(msg, 'err');
       return;
     }
-
-    const data = await resp.json();
-    const ok = data.results.filter(r => !r.error).length;
-    const fail = data.results.filter(r => r.error).length;
-    progText.textContent = ok + ' poster' + (ok !== 1 ? 's' : '') + ' generated' +
-                           (fail ? ', ' + fail + ' failed' : '') + '.';
-    if (ok) toast(ok + ' poster' + (ok !== 1 ? 's' : '') + ' generated!', 'ok');
-    if (fail) toast(fail + ' generation' + (fail !== 1 ? 's' : '') + ' failed.', 'err');
-
-    let html = '';
-    data.results.forEach((r, i) => {
-      if (r.error) {
-        html += '<div class="res-card" style="animation-delay:'+i*0.08+'s">' +
-                '<div class="res-foot" style="color:var(--err)">✗ ' + r.theme + ': ' + r.error + '</div></div>';
-      } else {
-        const ext = payload.format;
-        html += '<div class="res-card" style="animation-delay:'+i*0.08+'s">';
-        if (ext === 'png') {
-          html += '<img src="/posters/'+r.file+'?t='+Date.now()+'" ' +
-                  'onclick="openLightbox(\'/posters/'+r.file+'\')">';
-        } else {
-          html += '<div style="padding:36px;text-align:center;color:var(--muted)">'+
-                  ext.toUpperCase()+' generated — download below.</div>';
-        }
-        html += '<div class="res-foot"><span class="res-title">'+city+', '+country+
-                ' — '+(T[r.theme]?.name||r.theme)+'</span>' +
-                '<a href="/posters/'+r.file+'" download class="btn btn-sm btn-p">Download '+
-                ext.toUpperCase()+'</a></div></div>';
-      }
-    });
-    document.getElementById('result').innerHTML = html;
-    setTimeout(() => document.getElementById('result').scrollIntoView({behavior:'smooth'}), 150);
-
+    const {task_id} = await resp.json();
+    await pollTask(task_id, city, country, payload.format);
   } catch(e) {
-    fill.classList.remove('pulse');
     progText.textContent = 'Network error: ' + e.message;
     toast('Network error: ' + e.message, 'err');
   } finally {
     btnGen.disabled = btnAll.disabled = false;
     btnGen.innerHTML = 'Generate Poster';
   }
+}
+
+async function pollTask(taskId, city, country, fmt) {
+  const fill = document.getElementById('prog-fill');
+  const progText = document.getElementById('prog-text');
+
+  while (true) {
+    await new Promise(r => setTimeout(r, 1500));
+    let task;
+    try { task = await fetch('/api/task/' + taskId).then(r => r.json()); }
+    catch { continue; }
+
+    fill.style.width = Math.round((task.progress || 0) * 100) + '%';
+    progText.textContent = task.message || '…';
+
+    if (task.status === 'done') {
+      const results = task.results || [];
+      const ok = results.filter(r => !r.error).length;
+      const fail = results.filter(r => r.error).length;
+      if (ok) toast(ok + ' poster' + (ok !== 1 ? 's' : '') + ' generated!', 'ok');
+      if (fail) toast(fail + ' generation' + (fail !== 1 ? 's' : '') + ' failed.', 'err');
+
+      let html = '';
+      results.forEach((r, i) => {
+        if (r.error) {
+          html += '<div class="res-card" style="animation-delay:'+i*0.08+'s">' +
+                  '<div class="res-foot" style="color:var(--err)">✗ ' + r.theme + ': ' + r.error + '</div></div>';
+        } else {
+          html += '<div class="res-card" style="animation-delay:'+i*0.08+'s">';
+          if (fmt === 'png') {
+            html += '<img src="/posters/'+r.file+'?t='+Date.now()+'" onclick="openLightbox(\'/posters/'+r.file+'\')">';
+          } else {
+            html += '<div style="padding:36px;text-align:center;color:var(--muted)">'+
+                    fmt.toUpperCase()+' generated — download below.</div>';
+          }
+          html += '<div class="res-foot"><span class="res-title">'+city+', '+country+
+                  ' — '+(T[r.theme]?.name||r.theme)+'</span>' +
+                  '<a href="/posters/'+r.file+'" download class="btn btn-sm btn-p">Download '+
+                  fmt.toUpperCase()+'</a></div></div>';
+        }
+      });
+      document.getElementById('result').innerHTML = html;
+      setTimeout(() => document.getElementById('result').scrollIntoView({behavior:'smooth'}), 150);
+      break;
+    } else if (task.status === 'error') {
+      toast(task.message, 'err');
+      break;
+    }
+  }
+}
+
+/* Leaflet map picker */
+let _map = null, _marker = null;
+
+document.querySelector('details.adv').addEventListener('toggle', function() {
+  if (this.open && !_map) {
+    _map = L.map('coord-map').setView([20, 0], 2);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '© <a href="https://openstreetmap.org">OpenStreetMap</a>',
+      maxZoom: 19
+    }).addTo(_map);
+    _map.on('click', e => setCoords(e.latlng.lat, e.latlng.lng));
+
+    // Restore marker if inputs already have values
+    const lat = document.getElementById('latitude').value;
+    const lng = document.getElementById('longitude').value;
+    if (lat && lng) setCoords(parseFloat(lat), parseFloat(lng), false);
+  }
+});
+
+function setCoords(lat, lng, updateInputs=true) {
+  if (updateInputs) {
+    document.getElementById('latitude').value = lat.toFixed(5);
+    document.getElementById('longitude').value = lng.toFixed(5);
+  }
+  const pos = L.latLng(lat, lng);
+  if (_marker) _marker.setLatLng(pos);
+  else _marker = L.marker(pos).addTo(_map);
+  _map.setView(pos, Math.max(_map.getZoom(), 10));
+}
+
+function clearCoords() {
+  document.getElementById('latitude').value = '';
+  document.getElementById('longitude').value = '';
+  if (_marker && _map) { _map.removeLayer(_marker); _marker = null; }
+  if (_map) _map.setView([20, 0], 2);
 }
 
 /* Ctrl+Enter */
@@ -625,4 +756,4 @@ function toggleDark() {
 if __name__ == "__main__":
     POSTERS_DIR.mkdir(exist_ok=True)
     print("MapToPoster GUI running at http://localhost:5000")
-    app.run(host="127.0.0.1", port=5000, debug=False)
+    app.run(host="127.0.0.1", port=5000, debug=False, threaded=True)
