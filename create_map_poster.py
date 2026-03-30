@@ -657,6 +657,7 @@ def create_poster(
     separator="line",
     vignette=True,
     grain=False,
+    show_country=True,
 ):
     """
     Generate a complete map poster with roads, water, parks, and typography.
@@ -711,11 +712,15 @@ def create_poster(
     # Project graph to a metric CRS so distances and aspect are linear (meters)
     g_proj = ox.project_graph(g)
 
-    def _project_gdf(gdf):
+    def _project_gdf(gdf, simplify: float = 0.0):
         try:
-            return ox.projection.project_gdf(gdf)
+            projected = ox.projection.project_gdf(gdf)
         except Exception:
-            return gdf.to_crs(g_proj.graph['crs'])
+            projected = gdf.to_crs(g_proj.graph['crs'])
+        if simplify > 0:
+            projected = projected.copy()
+            projected["geometry"] = projected["geometry"].simplify(simplify, preserve_topology=True)
+        return projected
 
     # 3. Plot Layers
     # Layer 1: Polygons (filter to only plot polygon/multipolygon geometries, not points)
@@ -725,7 +730,7 @@ def create_poster(
         lu_polys = landuse[landuse.geometry.type.isin(["Polygon", "MultiPolygon"])]
         if not lu_polys.empty:
             lu_color = theme.get("landuse", _darken_color(theme["bg"], 0.04))
-            _project_gdf(lu_polys).plot(ax=ax, facecolor=lu_color, edgecolor="none", alpha=0.6, zorder=0.2)
+            _project_gdf(lu_polys, simplify=5).plot(ax=ax, facecolor=lu_color, edgecolor="none", alpha=0.6, zorder=0.2)
 
     water = features_dict.get("water")
     if water is not None and not water.empty:
@@ -747,7 +752,7 @@ def create_poster(
         bld_polys = buildings[buildings.geometry.type.isin(["Polygon", "MultiPolygon"])]
         if not bld_polys.empty:
             bld_color = theme.get("buildings", theme.get("road_residential", theme["road_tertiary"]))
-            _project_gdf(bld_polys).plot(ax=ax, facecolor=bld_color, edgecolor="none", alpha=0.5, zorder=0.9)
+            _project_gdf(bld_polys, simplify=2).plot(ax=ax, facecolor=bld_color, edgecolor="none", alpha=0.5, zorder=0.9)
 
     # Layer 2: Roads with hierarchy coloring (single pass for colors + widths)
     print("Applying road hierarchy colors...")
@@ -845,9 +850,10 @@ def create_poster(
             transform=ax.transAxes, color=theme["text"], ha="center",
             fontproperties=font_main_adjusted, zorder=11)
 
-    ax.text(0.5, y_country, display_country.upper(),
-            transform=ax.transAxes, color=theme["text"], ha="center",
-            fontproperties=font_sub, zorder=11)
+    if show_country:
+        ax.text(0.5, y_country, display_country.upper(),
+                transform=ax.transAxes, color=theme["text"], ha="center",
+                fontproperties=font_sub, zorder=11)
 
     if has_tagline:
         ax.text(0.5, y_tagline, tagline,
@@ -862,8 +868,10 @@ def create_poster(
             transform=ax.transAxes, color=theme["text"], alpha=0.7, ha="center",
             fontproperties=font_coords, zorder=11)
 
-    # Separator between city name and country
-    if separator == "dots":
+    # Separator between city name and country (only when country is visible)
+    if not show_country:
+        pass
+    elif separator == "dots":
         for dx in [-0.06, -0.03, 0, 0.03, 0.06]:
             ax.plot([0.5 + dx], [y_sep], "o", transform=ax.transAxes,
                     color=theme["text"], markersize=2.0 * scale_factor, zorder=11)

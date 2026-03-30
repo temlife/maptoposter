@@ -97,6 +97,7 @@ def do_generate(params, coords=None, prefetched=None):
         separator=params.get("separator", "line"),
         vignette=params.get("vignette", True),
         grain=params.get("grain", False),
+        show_country=params.get("show_country", True),
     )
     return output_file
 
@@ -247,9 +248,14 @@ body{display:flex;min-height:100vh}
 
 /* Sidebar */
 .sidebar{
-  width:320px;min-width:320px;background:var(--surface);
-  border-right:1px solid var(--border);padding:20px 18px;
-  overflow-y:auto;display:flex;flex-direction:column;gap:18px;
+  width:400px;min-width:400px;background:var(--surface);
+  border-right:1px solid var(--border);padding:22px 20px;
+  overflow-y:auto;display:flex;flex-direction:column;gap:20px;
+}
+.section-label{
+  font-size:.62rem;font-weight:700;text-transform:uppercase;
+  letter-spacing:.1em;color:var(--muted);padding-bottom:8px;
+  border-bottom:1px solid var(--border);
 }
 .app-title{font-size:1.35rem;font-weight:700;letter-spacing:.04em;color:var(--accent)}
 .app-sub{font-size:.75rem;color:var(--muted);margin-top:2px}
@@ -381,35 +387,73 @@ details.adv .adv-body{padding:12px;display:flex;flex-direction:column;gap:10px}
 /* Map picker */
 #coord-map{height:200px;border-radius:var(--r);border:1px solid var(--border);margin-top:4px;z-index:0}
 
-/* Layer toggles + layout pills (shared pill style) */
+/* Pill chips (layers, separator) */
 .layer-row{display:flex;flex-wrap:wrap;gap:5px;margin-top:4px}
-.layer-chip{display:flex;align-items:center;gap:4px;padding:4px 10px;
-  border:1.5px solid var(--border);border-radius:20px;font-size:.78rem;
-  cursor:pointer;transition:border-color .15s,background .15s;user-select:none}
+.layer-chip{display:flex;align-items:center;gap:5px;padding:5px 11px;
+  border:1.5px solid var(--border);border-radius:20px;font-size:.8rem;
+  cursor:pointer;transition:border-color .15s,background .15s;user-select:none;position:relative}
 .layer-chip input{display:none}
 .layer-chip:has(input:checked){border-color:var(--accent);background:color-mix(in srgb,var(--accent) 8%,transparent)}
 .layer-chip:hover{border-color:var(--accent)}
 
-/* Layout pills (radio) */
-.layout-row{display:flex;gap:5px;margin-top:4px}
-.layout-pill{flex:1;display:flex;align-items:center;justify-content:center;gap:5px;
-  padding:5px 6px;border:1.5px solid var(--border);border-radius:20px;font-size:.75rem;
-  cursor:pointer;transition:border-color .15s,background .15s;user-select:none;text-align:center}
+/* Chip tooltip via data-tip attribute */
+.layer-chip[data-tip]:hover::after{
+  content:attr(data-tip);position:absolute;bottom:calc(100% + 7px);left:50%;
+  transform:translateX(-50%);background:var(--text);color:var(--bg);
+  font-size:.68rem;padding:4px 9px;border-radius:5px;white-space:nowrap;
+  z-index:200;pointer-events:none;font-weight:400;font-style:normal}
+.layer-chip[data-tip]:hover::before{
+  content:'';position:absolute;bottom:calc(100% + 3px);left:50%;
+  transform:translateX(-50%);border:4px solid transparent;
+  border-top-color:var(--text);z-index:200}
+
+/* Layout pills with SVG diagram */
+.layout-row{display:flex;gap:8px;margin-top:4px}
+.layout-pill{flex:1;display:flex;flex-direction:column;align-items:center;
+  justify-content:center;gap:6px;padding:10px 6px;
+  border:1.5px solid var(--border);border-radius:var(--r);font-size:.75rem;
+  cursor:pointer;transition:all .15s;user-select:none;color:var(--text)}
 .layout-pill input{display:none}
 .layout-pill:has(input:checked){border-color:var(--accent);background:color-mix(in srgb,var(--accent) 8%,transparent)}
 .layout-pill:hover{border-color:var(--accent)}
 
-/* Effects toggles (inline row) */
-.effects-row{display:flex;gap:8px;margin-top:4px}
-.fx-chip{display:flex;align-items:center;gap:4px;padding:4px 10px;
-  border:1.5px solid var(--border);border-radius:20px;font-size:.78rem;
-  cursor:pointer;transition:border-color .15s,background .15s;user-select:none}
-.fx-chip input{display:none}
+/* Sub-details (accordion within sections) */
+details.sub{border-top:1px solid var(--border);padding-top:10px}
+details.sub summary{
+  font-size:.8rem;font-weight:600;cursor:pointer;list-style:none;
+  display:flex;align-items:center;gap:6px;color:var(--muted);
+  user-select:none;padding-bottom:8px}
+details.sub summary::before{content:"▸";font-size:.65rem;transition:transform .2s;flex-shrink:0}
+details.sub[open] summary::before{transform:rotate(90deg)}
+details.sub[open] summary{color:var(--text)}
+details.sub .sub-body{display:flex;flex-direction:column;gap:12px;padding-bottom:4px}
+
+/* Effects chips (full-width with description) */
+.fx-chip{display:flex;align-items:center;gap:12px;padding:10px 14px;
+  border:1.5px solid var(--border);border-radius:var(--r);
+  cursor:pointer;transition:all .15s;user-select:none}
+.fx-chip input{
+  width:16px;height:16px;accent-color:var(--accent);
+  flex-shrink:0;cursor:pointer}
 .fx-chip:has(input:checked){border-color:var(--accent);background:color-mix(in srgb,var(--accent) 8%,transparent)}
 .fx-chip:hover{border-color:var(--accent)}
+.fx-title{font-size:.82rem;font-weight:600}
+.fx-desc{font-size:.72rem;color:var(--muted);margin-top:2px}
+
+/* Format presets */
+.fmt-chip{display:inline-flex;flex-direction:column;align-items:center;
+  padding:6px 12px;border:1.5px solid var(--border);border-radius:var(--r);
+  font-size:.8rem;font-weight:600;cursor:pointer;transition:all .15s;user-select:none}
+.fmt-chip.active{border-color:var(--accent);background:color-mix(in srgb,var(--accent) 8%,transparent)}
+.fmt-chip:hover{border-color:var(--accent)}
+.fmt-sub{font-size:.65rem;font-weight:400;color:var(--muted);margin-top:1px}
+.fmt-row{display:flex;gap:6px;margin-top:4px;flex-wrap:wrap}
+
+/* Sep preview glyph */
+.sep-preview{font-size:.85rem;opacity:.7}
 
 /* Responsive */
-@media(max-width:760px){
+@media(max-width:900px){
   body{flex-direction:column}
   .sidebar{width:100%;min-width:0;border-right:none;border-bottom:1px solid var(--border)}
   .main{padding:18px}
@@ -420,6 +464,7 @@ details.adv .adv-body{padding:12px;display:flex;flex-direction:column;gap:10px}
 <body>
 
 <aside class="sidebar">
+
   <!-- Header -->
   <div style="display:flex;justify-content:space-between;align-items:start">
     <div>
@@ -431,9 +476,10 @@ details.adv .adv-body{padding:12px;display:flex;flex-direction:column;gap:10px}
     </button>
   </div>
 
-  <!-- Location (required) -->
-  <div style="display:flex;flex-direction:column;gap:10px">
-    <div class="row">
+  <!-- ── LOCATION ── -->
+  <div>
+    <div class="section-label">Location</div>
+    <div class="row" style="margin-top:8px">
       <div class="field">
         <label for="city">City *</label>
         <input id="city" type="text" placeholder="e.g. Paris">
@@ -443,103 +489,195 @@ details.adv .adv-body{padding:12px;display:flex;flex-direction:column;gap:10px}
         <input id="country" type="text" placeholder="e.g. France">
       </div>
     </div>
-    <div class="field">
-      <input id="tagline" type="text" placeholder='Tagline (optional) — e.g. "The City of Lights"'
-             style="font-size:.8rem;font-style:italic">
-    </div>
   </div>
 
-  <!-- Radius -->
-  <div class="field">
-    <label for="distance">Map Radius</label>
-    <div class="slider-row">
-      <input id="distance" type="range" min="2000" max="30000" step="1000" value="18000">
-      <span class="slider-val" id="dist-val">18 km</span>
-    </div>
-    <div class="hint">4-6 km: small/dense &nbsp;·&nbsp; 8-12 km: medium &nbsp;·&nbsp; 15-20 km: large metro</div>
-  </div>
-
-  <!-- Layers -->
-  <div class="field">
-    <label>Layers</label>
-    <div class="layer-row">
-      <label class="layer-chip"><input type="checkbox" value="water" checked> Water</label>
-      <label class="layer-chip"><input type="checkbox" value="parks" checked> Parks</label>
-      <label class="layer-chip"><input type="checkbox" value="landuse"> Land use</label>
-      <label class="layer-chip"><input type="checkbox" value="buildings" checked> Buildings</label>
-      <label class="layer-chip"><input type="checkbox" value="railways" checked> Railways</label>
-    </div>
-  </div>
-
-  <!-- Theme -->
-  <div class="field">
-    <label>Theme</label>
-    <div class="theme-grid" id="theme-grid">
-      {% for key, t in themes.items() %}
-      <div class="chip{% if key == 'terracotta' %} active{% endif %}"
-           data-key="{{ key }}" title="{{ t.get('description','') }}">
-        <span class="dot" style="background:{{ t.bg }};border-color:{{ t.get('road_primary','#888') }}"></span>
-        <span>{{ t.get('name', key) }}</span>
-      </div>
-      {% endfor %}
-    </div>
-    <div class="theme-hint" id="theme-hint">{{ themes.get('terracotta',{}).get('description','') }}</div>
-  </div>
-
-  <!-- Advanced options (collapsed by default) -->
-  <details class="adv">
-    <summary>Advanced options</summary>
-    <div class="adv-body">
-      <!-- Layout -->
+  <!-- ── MAP ── -->
+  <div>
+    <div class="section-label">Map</div>
+    <div style="display:flex;flex-direction:column;gap:12px;margin-top:8px">
       <div class="field">
-        <label>Text layout</label>
-        <div class="layout-row">
-          <label class="layout-pill"><input type="radio" name="layout" value="bottom" checked> ⬇ Bottom</label>
-          <label class="layout-pill"><input type="radio" name="layout" value="top"> ⬆ Top</label>
+        <label for="distance">Radius — how much of the city to show</label>
+        <div class="slider-row">
+          <input id="distance" type="range" min="2000" max="30000" step="1000" value="18000">
+          <span class="slider-val" id="dist-val">18 km</span>
         </div>
+        <div class="hint">4–6 km: dense neighbourhood &nbsp;·&nbsp; 8–12 km: city centre &nbsp;·&nbsp; 15–20 km: metro area</div>
       </div>
-      <!-- Separator style -->
       <div class="field">
-        <label>Separator</label>
+        <label>Content — which map layers to render</label>
         <div class="layer-row">
-          <label class="layer-chip"><input type="radio" name="separator" value="line" checked> Line</label>
-          <label class="layer-chip"><input type="radio" name="separator" value="double"> Double</label>
-          <label class="layer-chip"><input type="radio" name="separator" value="dots"> Dots</label>
+          <label class="layer-chip" data-tip="Rivers, lakes &amp; sea"><input type="checkbox" value="water" checked> Water</label>
+          <label class="layer-chip" data-tip="Parks &amp; green spaces"><input type="checkbox" value="parks" checked> Parks</label>
+          <label class="layer-chip" data-tip="Residential, retail &amp; industrial zones"><input type="checkbox" value="landuse"> Land use</label>
+          <label class="layer-chip" data-tip="Building footprints — slow on large radii"><input type="checkbox" value="buildings"> Buildings</label>
+          <label class="layer-chip" data-tip="Metro, tram &amp; rail lines"><input type="checkbox" value="railways" checked> Railways</label>
         </div>
       </div>
-      <!-- Visual effects -->
+    </div>
+  </div>
+
+  <!-- ── APPEARANCE ── -->
+  <div>
+    <div class="section-label">Appearance</div>
+    <div style="display:flex;flex-direction:column;gap:0;margin-top:8px">
+
+      <!-- Theme -->
+      <div class="field" style="margin-bottom:12px">
+        <label>Theme — colour palette for the poster</label>
+        <div class="theme-grid" id="theme-grid" style="margin-top:6px">
+          {% for key, t in themes.items() %}
+          <div class="chip{% if key == 'terracotta' %} active{% endif %}"
+               data-key="{{ key }}" title="{{ t.get('description','') }}">
+            <span class="dot" style="background:{{ t.bg }};border-color:{{ t.get('road_primary','#888') }}"></span>
+            <span>{{ t.get('name', key) }}</span>
+          </div>
+          {% endfor %}
+        </div>
+        <div class="theme-hint" id="theme-hint" style="margin-top:5px">{{ themes.get('terracotta',{}).get('description','') }}</div>
+      </div>
+
+      <!-- Sub: Poster text -->
+      <details class="sub">
+        <summary>Poster text</summary>
+        <div class="sub-body">
+          <div class="field">
+            <label for="tagline">Tagline <span style="font-weight:400;color:var(--muted)">(optional)</span></label>
+            <input id="tagline" type="text" placeholder='e.g. "The City of Lights"'
+                   style="font-size:.85rem;font-style:italic">
+            <div class="hint">A short subtitle printed below the country name on the poster.</div>
+          </div>
+          <label class="fx-chip">
+            <input type="checkbox" id="show-country" checked>
+            <div>
+              <div class="fx-title">Show country name</div>
+              <div class="fx-desc">Uncheck to display only the city name and coordinates</div>
+            </div>
+          </label>
+          <div class="field">
+            <label>Text position</label>
+            <div class="layout-row">
+              <label class="layout-pill">
+                <input type="radio" name="layout" value="bottom" checked>
+                <svg viewBox="0 0 20 28" width="30" height="42">
+                  <rect x=".5" y=".5" width="19" height="27" rx="1.2" fill="none" stroke="currentColor" stroke-width=".9"/>
+                  <line x1="2" y1="5" x2="11" y2="6.5" stroke="currentColor" stroke-width=".7" opacity=".4"/>
+                  <line x1="5" y1="8" x2="18" y2="7" stroke="currentColor" stroke-width=".6" opacity=".4"/>
+                  <line x1="2" y1="11" x2="13" y2="10" stroke="currentColor" stroke-width=".5" opacity=".3"/>
+                  <line x1="9" y1="13.5" x2="18" y2="14.5" stroke="currentColor" stroke-width=".5" opacity=".3"/>
+                  <rect x=".5" y="15.5" width="19" height="5" fill="currentColor" opacity=".06"/>
+                  <rect x="4" y="19" width="12" height="1.6" rx=".4" fill="currentColor" opacity=".65"/>
+                  <rect x="6.5" y="22" width="7" height="1" rx=".3" fill="currentColor" opacity=".45"/>
+                  <rect x="7.5" y="24.5" width="5" height=".8" rx=".3" fill="currentColor" opacity=".3"/>
+                </svg>
+                Bottom
+              </label>
+              <label class="layout-pill">
+                <input type="radio" name="layout" value="top">
+                <svg viewBox="0 0 20 28" width="30" height="42">
+                  <rect x=".5" y=".5" width="19" height="27" rx="1.2" fill="none" stroke="currentColor" stroke-width=".9"/>
+                  <rect x="4" y="3" width="12" height="1.6" rx=".4" fill="currentColor" opacity=".65"/>
+                  <rect x="6.5" y="5.5" width="7" height="1" rx=".3" fill="currentColor" opacity=".45"/>
+                  <rect x="7.5" y="8" width="5" height=".8" rx=".3" fill="currentColor" opacity=".3"/>
+                  <rect x=".5" y="8.5" width="19" height="5" fill="currentColor" opacity=".06"/>
+                  <line x1="2" y1="16" x2="11" y2="17.5" stroke="currentColor" stroke-width=".7" opacity=".4"/>
+                  <line x1="5" y1="19" x2="18" y2="18" stroke="currentColor" stroke-width=".6" opacity=".4"/>
+                  <line x1="2" y1="22" x2="13" y2="21" stroke="currentColor" stroke-width=".5" opacity=".3"/>
+                  <line x1="9" y1="24.5" x2="18" y2="25.5" stroke="currentColor" stroke-width=".5" opacity=".3"/>
+                </svg>
+                Top
+              </label>
+            </div>
+          </div>
+          <div class="field">
+            <label>Separator — decorative line between city and country</label>
+            <div class="layer-row" style="margin-top:4px">
+              <label class="layer-chip"><input type="radio" name="separator" value="line" checked>
+                <span class="sep-preview">———</span> Line</label>
+              <label class="layer-chip"><input type="radio" name="separator" value="double">
+                <span class="sep-preview" style="font-size:.7rem;line-height:1.2;letter-spacing:1px">══</span> Double</label>
+              <label class="layer-chip"><input type="radio" name="separator" value="dots">
+                <span class="sep-preview" style="letter-spacing:3px">···</span> Dots</label>
+            </div>
+          </div>
+        </div>
+      </details>
+
+      <!-- Sub: Visual effects -->
+      <details class="sub">
+        <summary>Visual effects</summary>
+        <div class="sub-body">
+          <label class="fx-chip">
+            <input type="checkbox" id="fx-vignette" checked>
+            <div>
+              <div class="fx-title">Vignette</div>
+              <div class="fx-desc">Darkens the edges, creating a focused and polished print look</div>
+            </div>
+          </label>
+          <label class="fx-chip">
+            <input type="checkbox" id="fx-grain">
+            <div>
+              <div class="fx-title">Grain</div>
+              <div class="fx-desc">Adds a subtle paper texture — gives a handcrafted, printed feel</div>
+            </div>
+          </label>
+        </div>
+      </details>
+
+    </div>
+  </div>
+
+  <!-- ── EXPORT (collapsed) ── -->
+  <details class="adv">
+    <summary>Export</summary>
+    <div class="adv-body">
       <div class="field">
-        <label>Visual effects</label>
-        <div class="effects-row">
-          <label class="fx-chip"><input type="checkbox" id="fx-vignette" checked> Vignette</label>
-          <label class="fx-chip"><input type="checkbox" id="fx-grain"> Grain</label>
+        <label>Paper format</label>
+        <div class="hint" style="margin-bottom:6px">Select a standard size or enter custom dimensions.</div>
+        <div class="fmt-row">
+          <span class="fmt-chip" data-fmt="A4" onclick="setFormatPreset('A4',8.27,11.69)">
+            A4<span class="fmt-sub">21×30 cm</span>
+          </span>
+          <span class="fmt-chip" data-fmt="A3" onclick="setFormatPreset('A3',11.69,16.54)">
+            A3<span class="fmt-sub">30×42 cm</span>
+          </span>
+          <span class="fmt-chip" data-fmt="A2" onclick="setFormatPreset('A2',16.54,23.39)">
+            A2<span class="fmt-sub">42×59 cm</span>
+          </span>
+          <span class="fmt-chip active" data-fmt="custom" onclick="setFormatPreset('custom',0,0)">
+            Custom
+          </span>
         </div>
       </div>
-      <!-- Dimensions -->
-      <div class="row">
-        <div class="field"><label for="width">Width (in)</label>
+      <div id="custom-dims" class="row">
+        <div class="field"><label for="width">Width (inches)</label>
           <input id="width" type="number" value="12" min="4" max="20" step="0.5"></div>
-        <div class="field"><label for="height">Height (in)</label>
+        <div class="field"><label for="height">Height (inches)</label>
           <input id="height" type="number" value="16" min="4" max="20" step="0.5"></div>
       </div>
       <div class="row">
-        <div class="field"><label for="format">Output Format</label>
+        <div class="field"><label for="format">File format</label>
           <select id="format">
-            <option value="png" selected>PNG</option>
-            <option value="svg">SVG (vector)</option>
-            <option value="pdf">PDF (print)</option>
+            <option value="png" selected>PNG — standard image</option>
+            <option value="svg">SVG — scalable vector</option>
+            <option value="pdf">PDF — ready to print</option>
           </select>
         </div>
-        <div class="field"><label for="dpi">Quality</label>
+        <div class="field"><label for="dpi">Resolution</label>
           <select id="dpi">
-            <option value="150">150 DPI — fast</option>
-            <option value="300" selected>300 DPI — print</option>
+            <option value="150">Fast preview (150 dpi)</option>
+            <option value="300" selected>Print quality (300 dpi)</option>
           </select>
         </div>
       </div>
-      <!-- Map picker -->
+    </div>
+  </details>
+
+  <!-- ── ADVANCED (collapsed) ── -->
+  <details class="adv" id="adv-advanced">
+    <summary>Advanced</summary>
+    <div class="adv-body">
       <div class="field">
-        <label>Center Point</label>
+        <label>Map centre point</label>
         <div id="coord-map"></div>
         <div class="row" style="margin-top:6px">
           <div class="field"><label for="latitude">Latitude</label>
@@ -547,22 +685,26 @@ details.adv .adv-body{padding:12px;display:flex;flex-direction:column;gap:10px}
           <div class="field"><label for="longitude">Longitude</label>
             <input id="longitude" type="text" placeholder="auto-detect"></div>
         </div>
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-top:2px">
-          <div class="hint">Click the map to pin the poster center, or leave blank to geocode from the city name.</div>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-top:4px">
+          <div class="hint">Click the map to pin the centre, or leave blank to geocode from the city name.</div>
           <button type="button" onclick="clearCoords()"
                   style="font-size:.7rem;color:var(--muted);background:none;border:none;cursor:pointer;text-decoration:underline;padding:0;flex-shrink:0;margin-left:8px">
             Clear
           </button>
         </div>
       </div>
-      <!-- Display names (i18n) -->
-      <div class="field"><label for="display_city">Custom city label on poster</label>
-        <input id="display_city" type="text" placeholder="e.g. 東京 for Tokyo"></div>
-      <div class="field"><label for="display_country">Custom country label on poster</label>
+      <div class="field">
+        <label for="display_city">Custom city label <span style="font-weight:400;color:var(--muted)">(for non-Latin scripts)</span></label>
+        <input id="display_city" type="text" placeholder="e.g. 東京 for Tokyo">
+        <div class="hint">Overrides the city text printed on the poster.</div>
+      </div>
+      <div class="field">
+        <label for="display_country">Custom country label</label>
         <input id="display_country" type="text" placeholder="e.g. 日本 for Japan"></div>
-      <div class="field"><label for="font_family">Google Font</label>
+      <div class="field">
+        <label for="font_family">Google Font</label>
         <input id="font_family" type="text" placeholder="e.g. Noto Sans JP">
-        <div class="hint">Leave blank to use the default Roboto font.</div>
+        <div class="hint">Font family name from Google Fonts. Leave blank for the default Roboto.</div>
       </div>
     </div>
   </details>
@@ -573,6 +715,7 @@ details.adv .adv-body{padding:12px;display:flex;flex-direction:column;gap:10px}
     <button class="btn btn-s" id="btn-all" onclick="generate(true)">Generate All Themes</button>
     <div class="hint" style="text-align:center">Ctrl+Enter to generate</div>
   </div>
+
 </aside>
 
 <main class="main">
@@ -612,6 +755,19 @@ function toast(msg, type='info', ms=4000) {
     el.classList.add('out');
     el.addEventListener('animationend', () => el.remove());
   }, ms);
+}
+
+/* Format presets */
+function setFormatPreset(name, w, h) {
+  document.querySelectorAll('.fmt-chip').forEach(c => c.classList.toggle('active', c.dataset.fmt === name));
+  const customDims = document.getElementById('custom-dims');
+  if (name === 'custom') {
+    customDims.style.display = '';
+  } else {
+    document.getElementById('width').value = w;
+    document.getElementById('height').value = h;
+    customDims.style.display = 'none';
+  }
 }
 
 /* Radius slider */
@@ -703,6 +859,7 @@ async function generate(allThemes) {
     separator: document.querySelector('input[name="separator"]:checked')?.value || 'line',
     vignette: document.getElementById('fx-vignette').checked,
     grain: document.getElementById('fx-grain').checked,
+    show_country: document.getElementById('show-country').checked,
     all_themes: allThemes,
   };
 
@@ -795,7 +952,7 @@ async function pollTask(taskId, city, country, fmt) {
 /* Leaflet map picker */
 let _map = null, _marker = null;
 
-document.querySelector('details.adv').addEventListener('toggle', function() {
+document.getElementById('adv-advanced').addEventListener('toggle', function() {
   if (this.open && !_map) {
     _map = L.map('coord-map').setView([20, 0], 2);
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
