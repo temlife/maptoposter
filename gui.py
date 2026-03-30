@@ -70,6 +70,7 @@ def do_generate(params, coords=None, prefetched=None):
         custom_fonts = load_fonts(params["font_family"])
 
     theme = cmp.load_theme(params["theme"])
+    layers = params.get("layers") or None  # None → all layers
 
     fmt = params.get("format", "png")
     output_file = cmp.generate_output_filename(city, params["theme"], fmt)
@@ -88,6 +89,7 @@ def do_generate(params, coords=None, prefetched=None):
         fonts=custom_fonts,
         theme=theme,
         prefetched=prefetched,
+        layers=layers,
     )
     return output_file
 
@@ -128,7 +130,7 @@ def _run_task(task_id: str, data: dict) -> None:
             width = float(data.get("width", 12))
             height = float(data.get("height", 16))
             comp_dist = dist * (max(height, width) / min(height, width)) / 4
-            prefetched = cmp.fetch_map_data(coords, comp_dist)
+            prefetched = cmp.fetch_map_data(coords, comp_dist, layers=data.get("layers") or None)
         else:
             prefetched = None
 
@@ -313,12 +315,17 @@ details.adv .adv-body{padding:12px;display:flex;flex-direction:column;gap:10px}
 
 /* Results */
 #result{margin-top:20px}
+.res-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:14px}
 .res-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--r);
-          margin-bottom:18px;overflow:hidden;animation:fadeIn .4s ease both}
-.res-card img{width:100%;max-height:70vh;object-fit:contain;display:block;background:var(--bg);cursor:pointer}
-.res-card .res-foot{padding:11px 14px;display:flex;justify-content:space-between;
-                    align-items:center;border-top:1px solid var(--border)}
-.res-card .res-title{font-weight:600;font-size:.9rem}
+          overflow:hidden;animation:fadeIn .4s ease both;display:flex;flex-direction:column}
+.res-card img{width:100%;aspect-ratio:3/4;object-fit:cover;object-position:center;
+              display:block;background:var(--bg);cursor:pointer}
+.res-card .res-foot{padding:9px 12px;display:flex;justify-content:space-between;
+                    align-items:center;border-top:1px solid var(--border);gap:8px;margin-top:auto}
+.res-card .res-title{font-weight:600;font-size:.8rem;overflow:hidden;
+                     text-overflow:ellipsis;white-space:nowrap;min-width:0}
+/* Single result: wider card, full image */
+.res-grid.single .res-card img{aspect-ratio:unset;max-height:70vh;object-fit:contain}
 
 /* Progress */
 #progress{display:none;margin-top:16px}
@@ -367,6 +374,15 @@ details.adv .adv-body{padding:12px;display:flex;flex-direction:column;gap:10px}
 /* Map picker */
 #coord-map{height:200px;border-radius:var(--r);border:1px solid var(--border);margin-top:4px;z-index:0}
 
+/* Layer toggles */
+.layer-row{display:flex;flex-wrap:wrap;gap:5px;margin-top:4px}
+.layer-chip{display:flex;align-items:center;gap:4px;padding:4px 10px;
+  border:1.5px solid var(--border);border-radius:20px;font-size:.78rem;
+  cursor:pointer;transition:border-color .15s,background .15s;user-select:none}
+.layer-chip input{display:none}
+.layer-chip:has(input:checked){border-color:var(--accent);background:color-mix(in srgb,var(--accent) 8%,transparent)}
+.layer-chip:hover{border-color:var(--accent)}
+
 /* Responsive */
 @media(max-width:760px){
   body{flex-direction:column}
@@ -410,6 +426,17 @@ details.adv .adv-body{padding:12px;display:flex;flex-direction:column;gap:10px}
       <span class="slider-val" id="dist-val">18 km</span>
     </div>
     <div class="hint">4-6 km: small/dense &nbsp;·&nbsp; 8-12 km: medium &nbsp;·&nbsp; 15-20 km: large metro</div>
+  </div>
+
+  <!-- Layers -->
+  <div class="field">
+    <label>Layers</label>
+    <div class="layer-row">
+      <label class="layer-chip"><input type="checkbox" value="water" checked> Water</label>
+      <label class="layer-chip"><input type="checkbox" value="parks" checked> Parks</label>
+      <label class="layer-chip"><input type="checkbox" value="buildings" checked> Buildings</label>
+      <label class="layer-chip"><input type="checkbox" value="railways" checked> Railways</label>
+    </div>
   </div>
 
   <!-- Theme -->
@@ -597,6 +624,7 @@ async function generate(allThemes) {
     longitude: document.getElementById('longitude').value.trim(),
     distance: distSlider.value,
     theme: getTheme(),
+    layers: Array.from(document.querySelectorAll('.layer-chip input:checked')).map(i => i.value),
     display_city: document.getElementById('display_city').value.trim(),
     display_country: document.getElementById('display_country').value.trim(),
     country_label: '',
@@ -662,7 +690,9 @@ async function pollTask(taskId, city, country, fmt) {
       if (ok) toast(ok + ' poster' + (ok !== 1 ? 's' : '') + ' generated!', 'ok');
       if (fail) toast(fail + ' generation' + (fail !== 1 ? 's' : '') + ' failed.', 'err');
 
-      let html = '';
+      const ts = Date.now();
+      const isSingle = results.length === 1;
+      let html = '<div class="res-grid' + (isSingle ? ' single' : '') + '">';
       results.forEach((r, i) => {
         if (r.error) {
           html += '<div class="res-card" style="animation-delay:'+i*0.08+'s">' +
@@ -670,17 +700,17 @@ async function pollTask(taskId, city, country, fmt) {
         } else {
           html += '<div class="res-card" style="animation-delay:'+i*0.08+'s">';
           if (fmt === 'png') {
-            html += '<img src="/posters/'+r.file+'?t='+Date.now()+'" onclick="openLightbox(\'/posters/'+r.file+'\')">';
+            html += '<img src="/posters/'+r.file+'?t='+ts+'" onclick="openLightbox(\'/posters/'+r.file+'\')">';
           } else {
             html += '<div style="padding:36px;text-align:center;color:var(--muted)">'+
                     fmt.toUpperCase()+' generated — download below.</div>';
           }
-          html += '<div class="res-foot"><span class="res-title">'+city+', '+country+
-                  ' — '+(T[r.theme]?.name||r.theme)+'</span>' +
-                  '<a href="/posters/'+r.file+'" download class="btn btn-sm btn-p">Download '+
+          html += '<div class="res-foot"><span class="res-title">'+(T[r.theme]?.name||r.theme)+'</span>' +
+                  '<a href="/posters/'+r.file+'" download class="btn btn-sm btn-p">↓ '+
                   fmt.toUpperCase()+'</a></div></div>';
         }
       });
+      html += '</div>';
       document.getElementById('result').innerHTML = html;
       setTimeout(() => document.getElementById('result').scrollIntoView({behavior:'smooth'}), 150);
       break;

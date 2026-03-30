@@ -53,6 +53,15 @@ FILE_ENCODING = "utf-8"
 CACHE_TTL_DAYS = int(os.environ.get("CACHE_TTL_DAYS", "30"))
 CACHE_MAX_SIZE_MB = int(os.environ.get("CACHE_MAX_SIZE_MB", "500"))
 
+# OSM feature layers: name → tags dict for ox.features_from_point
+LAYER_TAGS: dict[str, dict] = {
+    "water": {"natural": ["water", "bay", "strait"], "waterway": "riverbank"},
+    "parks": {"leisure": "park", "landuse": "grass"},
+    "buildings": {"building": True},
+    "railways": {"railway": ["rail", "subway", "light_rail", "tram"]},
+}
+DEFAULT_LAYERS = list(LAYER_TAGS.keys())
+
 
 @dataclass
 class _CacheEntry:
@@ -524,25 +533,29 @@ def fetch_features(point, dist, tags, name) -> GeoDataFrame | None:
         return None
 
 
-def fetch_map_data(point: tuple, compensated_dist: float):
+def fetch_map_data(point: tuple, compensated_dist: float, layers: list | None = None):
     """
     Fetch all OSM data required for poster generation.
 
-    Returns (graph, water, parks). Pass result as prefetched=(graph, water, parks)
+    Returns (graph, features_dict). Pass result as prefetched=(graph, features_dict)
     to create_poster() to render multiple themes without re-downloading OSM data.
 
     Args:
         point: (latitude, longitude) tuple
         compensated_dist: Adjusted distance in meters (accounting for poster aspect ratio)
+        layers: List of layer names to fetch (default: all layers in DEFAULT_LAYERS)
 
     Returns:
-        Tuple of (graph, water GeoDataFrame, parks GeoDataFrame)
+        Tuple of (graph, features_dict) where features_dict maps layer name → GeoDataFrame
 
     Raises:
         RuntimeError: If street network data cannot be retrieved
     """
+    if layers is None:
+        layers = DEFAULT_LAYERS
+
     with tqdm(
-        total=3,
+        total=1 + len(layers),
         desc="Fetching map data",
         unit="step",
         bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt}",
@@ -553,26 +566,17 @@ def fetch_map_data(point: tuple, compensated_dist: float):
             raise RuntimeError("Failed to retrieve street network data.")
         pbar.update(1)
 
-        pbar.set_description("Downloading water features")
-        water = fetch_features(
-            point,
-            compensated_dist,
-            tags={"natural": ["water", "bay", "strait"], "waterway": "riverbank"},
-            name="water",
-        )
-        pbar.update(1)
-
-        pbar.set_description("Downloading parks/green spaces")
-        parks = fetch_features(
-            point,
-            compensated_dist,
-            tags={"leisure": "park", "landuse": "grass"},
-            name="parks",
-        )
-        pbar.update(1)
+        features_dict: dict = {}
+        for layer in layers:
+            tags = LAYER_TAGS.get(layer)
+            if tags is None:
+                continue
+            pbar.set_description(f"Downloading {layer}")
+            features_dict[layer] = fetch_features(point, compensated_dist, tags=tags, name=layer)
+            pbar.update(1)
 
     print("✓ All data retrieved successfully!")
-    return g, water, parks
+    return g, features_dict
 
 
 def create_poster(
@@ -591,6 +595,7 @@ def create_poster(
     fonts=None,
     theme=None,
     prefetched=None,
+    layers=None,
 ):
     """
     Generate a complete map poster with roads, water, parks, and typography.
@@ -609,14 +614,18 @@ def create_poster(
         height: Poster height in inches (default: 16)
         country_label: Optional override for country text on poster
         theme: Theme dict to use; falls back to global THEME if None
-        prefetched: Optional (graph, water, parks) tuple from fetch_map_data()
+        prefetched: Optional (graph, features_dict) tuple from fetch_map_data()
                     to skip OSM downloads when rendering multiple themes
+        layers: List of layer names to render (default: all DEFAULT_LAYERS)
 
     Raises:
         RuntimeError: If street network data cannot be retrieved
     """
     # Use explicit theme or fall back to global for backward compatibility
     theme = theme or THEME
+
+    if layers is None:
+        layers = DEFAULT_LAYERS
 
     # Handle display names for i18n support
     # Priority: display_city/display_country > name_label/country_label > city/country
@@ -628,9 +637,9 @@ def create_poster(
     # 1. Acquire OSM data — from pre-fetched cache or fresh download
     compensated_dist = dist * (max(height, width) / min(height, width)) / 4
     if prefetched is not None:
-        g, water, parks = prefetched
+        g, features_dict = prefetched
     else:
-        g, water, parks = fetch_map_data(point, compensated_dist)
+        g, features_dict = fetch_map_data(point, compensated_dist, layers=layers)
 
     # 2. Setup Plot — use Figure API directly to avoid pyplot global state (thread-safe)
     print("Rendering map...")
@@ -641,29 +650,33 @@ def create_poster(
     # Project graph to a metric CRS so distances and aspect are linear (meters)
     g_proj = ox.project_graph(g)
 
+    def _project_gdf(gdf):
+        try:
+            return ox.projection.project_gdf(gdf)
+        except Exception:
+            return gdf.to_crs(g_proj.graph['crs'])
+
     # 3. Plot Layers
     # Layer 1: Polygons (filter to only plot polygon/multipolygon geometries, not points)
+    water = features_dict.get("water")
     if water is not None and not water.empty:
-        # Filter to only polygon/multipolygon geometries to avoid point features showing as dots
         water_polys = water[water.geometry.type.isin(["Polygon", "MultiPolygon"])]
         if not water_polys.empty:
-            # Project water features in the same CRS as the graph
-            try:
-                water_polys = ox.projection.project_gdf(water_polys)
-            except Exception:
-                water_polys = water_polys.to_crs(g_proj.graph['crs'])
-            water_polys.plot(ax=ax, facecolor=theme['water'], edgecolor='none', zorder=0.5)
+            _project_gdf(water_polys).plot(ax=ax, facecolor=theme['water'], edgecolor='none', zorder=0.5)
 
+    parks = features_dict.get("parks")
     if parks is not None and not parks.empty:
-        # Filter to only polygon/multipolygon geometries to avoid point features showing as dots
         parks_polys = parks[parks.geometry.type.isin(["Polygon", "MultiPolygon"])]
         if not parks_polys.empty:
-            # Project park features in the same CRS as the graph
-            try:
-                parks_polys = ox.projection.project_gdf(parks_polys)
-            except Exception:
-                parks_polys = parks_polys.to_crs(g_proj.graph['crs'])
-            parks_polys.plot(ax=ax, facecolor=theme['parks'], edgecolor='none', zorder=0.8)
+            _project_gdf(parks_polys).plot(ax=ax, facecolor=theme['parks'], edgecolor='none', zorder=0.8)
+
+    buildings = features_dict.get("buildings")
+    if buildings is not None and not buildings.empty:
+        bld_polys = buildings[buildings.geometry.type.isin(["Polygon", "MultiPolygon"])]
+        if not bld_polys.empty:
+            # Derive building color: slightly darker than bg, very subtle
+            bld_color = theme.get('buildings', theme.get('road_residential', theme['road_tertiary']))
+            _project_gdf(bld_polys).plot(ax=ax, facecolor=bld_color, edgecolor='none', alpha=0.5, zorder=0.9)
 
     # Layer 2: Roads with hierarchy coloring
     print("Applying road hierarchy colors...")
@@ -684,6 +697,14 @@ def create_poster(
     ax.set_aspect("equal", adjustable="box")
     ax.set_xlim(crop_xlim)
     ax.set_ylim(crop_ylim)
+
+    # Layer 2b: Railways (rendered on top of roads as thin lines)
+    railways = features_dict.get("railways")
+    if railways is not None and not railways.empty:
+        rail_lines = railways[railways.geometry.type.isin(["LineString", "MultiLineString"])]
+        if not rail_lines.empty:
+            rail_color = theme.get('railways', theme.get('road_primary', '#888'))
+            _project_gdf(rail_lines).plot(ax=ax, color=rail_color, linewidth=0.8, alpha=0.7, zorder=2.5)
 
     # Layer 3: Gradients (Top and Bottom)
     create_gradient_fade(ax, theme['gradient_color'], location='bottom', zorder=10)
@@ -1027,6 +1048,14 @@ Examples:
         choices=["png", "svg", "pdf"],
         help="Output format for the poster (default: png)",
     )
+    parser.add_argument(
+        "--layers",
+        nargs="+",
+        default=None,
+        choices=list(LAYER_TAGS.keys()),
+        metavar="LAYER",
+        help=f"OSM layers to render (default: all). Choices: {', '.join(LAYER_TAGS.keys())}",
+    )
 
     args = parser.parse_args()
 
@@ -1093,11 +1122,13 @@ Examples:
         else:
             coords = get_coordinates(args.city, args.country)
 
+        cli_layers = args.layers  # None means all layers
+
         if len(themes_to_generate) > 1:
             # Pre-fetch OSM data once, then render all themes in parallel
             compensated_dist = args.distance * (max(args.height, args.width) / min(args.height, args.width)) / 4
             print(f"\nFetching OSM data once (shared across {len(themes_to_generate)} themes)...")
-            prefetched = fetch_map_data(tuple(coords), compensated_dist)
+            prefetched = fetch_map_data(tuple(coords), compensated_dist, layers=cli_layers)
 
             workers = min(4, len(themes_to_generate))
             print(f"Rendering {len(themes_to_generate)} themes with {workers} parallel workers...\n")
@@ -1114,6 +1145,7 @@ Examples:
                     fonts=custom_fonts,
                     theme=t,
                     prefetched=prefetched,
+                    layers=cli_layers,
                 )
                 return out
 
@@ -1138,6 +1170,7 @@ Examples:
                 display_country=args.display_country,
                 fonts=custom_fonts,
                 theme=THEME,
+                layers=cli_layers,
             )
 
         print("\n" + "=" * 50)
