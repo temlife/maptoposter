@@ -28,6 +28,9 @@ Thumbs.db
 # Package manager
 uv.lock
 
+# Generated posters
+posters/
+
 # Test outputs
 test_venv/
 htmlcov/

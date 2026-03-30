@@ -9,6 +9,8 @@ high-quality poster-ready images with roads, water features, and parks.
 
 import argparse
 import asyncio
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from dataclasses import dataclass
 import json
 import os
 import pickle
@@ -19,6 +21,7 @@ from pathlib import Path
 from typing import cast
 
 import matplotlib.colors as mcolors
+from matplotlib.figure import Figure
 import matplotlib.pyplot as plt
 import numpy as np
 import osmnx as ox
@@ -47,6 +50,16 @@ POSTERS_DIR = "posters"
 
 FILE_ENCODING = "utf-8"
 
+CACHE_TTL_DAYS = int(os.environ.get("CACHE_TTL_DAYS", "30"))
+CACHE_MAX_SIZE_MB = int(os.environ.get("CACHE_MAX_SIZE_MB", "500"))
+
+
+@dataclass
+class _CacheEntry:
+    data: object
+    timestamp: float
+
+
 FONTS = load_fonts()
 
 
@@ -66,13 +79,13 @@ def _cache_path(key: str) -> str:
 
 def cache_get(key: str):
     """
-    Retrieve a cached object by key.
+    Retrieve a cached object by key. Returns None if not found or expired.
 
     Args:
         key: Cache key identifier
 
     Returns:
-        Cached object if found, None otherwise
+        Cached object if found and not expired, None otherwise
 
     Raises:
         CacheError: If cache read operation fails
@@ -82,14 +95,22 @@ def cache_get(key: str):
         if not os.path.exists(path):
             return None
         with open(path, "rb") as f:
-            return pickle.load(f)
+            entry = pickle.load(f)
+        if isinstance(entry, _CacheEntry):
+            age_days = (time.time() - entry.timestamp) / 86400
+            if age_days > CACHE_TTL_DAYS:
+                os.remove(path)
+                return None
+            return entry.data
+        # Legacy format without TTL: return as-is
+        return entry
     except Exception as e:
         raise CacheError(f"Cache read failed: {e}") from e
 
 
 def cache_set(key: str, value):
     """
-    Store an object in the cache.
+    Store an object in the cache with a timestamp for TTL support.
 
     Args:
         key: Cache key identifier
@@ -101,11 +122,30 @@ def cache_set(key: str, value):
     try:
         if not os.path.exists(CACHE_DIR):
             os.makedirs(CACHE_DIR)
+        _cache_evict_if_needed()
         path = _cache_path(key)
         with open(path, "wb") as f:
-            pickle.dump(value, f, protocol=pickle.HIGHEST_PROTOCOL)
+            pickle.dump(_CacheEntry(data=value, timestamp=time.time()), f, protocol=pickle.HIGHEST_PROTOCOL)
     except Exception as e:
         raise CacheError(f"Cache write failed: {e}") from e
+
+
+def _cache_evict_if_needed():
+    """Remove oldest cache entries if total size exceeds CACHE_MAX_SIZE_MB."""
+    max_bytes = CACHE_MAX_SIZE_MB * 1024 * 1024
+    files = list(CACHE_DIR.glob("*.pkl"))
+    if not files:
+        return
+    total = sum(f.stat().st_size for f in files)
+    if total <= max_bytes:
+        return
+    files.sort(key=lambda f: f.stat().st_mtime)
+    for f in files:
+        if total <= max_bytes:
+            break
+        size = f.stat().st_size
+        f.unlink(missing_ok=True)
+        total -= size
 
 
 # Font loading now handled by font_management.py module
@@ -252,7 +292,7 @@ def create_gradient_fade(ax, color, location="bottom", zorder=10):
     )
 
 
-def get_edge_colors_by_type(g):
+def get_edge_colors_by_type(g, theme):
     """
     Assigns colors to edges based on road type hierarchy.
     Returns a list of colors corresponding to each edge in the graph.
@@ -269,17 +309,17 @@ def get_edge_colors_by_type(g):
 
         # Assign color based on road type
         if highway in ["motorway", "motorway_link"]:
-            color = THEME["road_motorway"]
+            color = theme["road_motorway"]
         elif highway in ["trunk", "trunk_link", "primary", "primary_link"]:
-            color = THEME["road_primary"]
+            color = theme["road_primary"]
         elif highway in ["secondary", "secondary_link"]:
-            color = THEME["road_secondary"]
+            color = theme["road_secondary"]
         elif highway in ["tertiary", "tertiary_link"]:
-            color = THEME["road_tertiary"]
+            color = theme["road_tertiary"]
         elif highway in ["residential", "living_street", "unclassified"]:
-            color = THEME["road_residential"]
+            color = theme["road_residential"]
         else:
-            color = THEME['road_default']
+            color = theme['road_default']
 
         edge_colors.append(color)
 
@@ -406,6 +446,11 @@ def get_crop_limits(g_proj, center_lat_lon, fig, dist):
     )
 
 
+def _round_coord(value: float, decimals: int = 3) -> float:
+    """Round coordinate for cache key (~100m precision at equator)."""
+    return round(value, decimals)
+
+
 def fetch_graph(point, dist) -> MultiDiGraph | None:
     """
     Fetch street network graph from OpenStreetMap.
@@ -420,7 +465,7 @@ def fetch_graph(point, dist) -> MultiDiGraph | None:
     Returns:
         MultiDiGraph of street network, or None if fetch fails
     """
-    lat, lon = point
+    lat, lon = _round_coord(point[0]), _round_coord(point[1])
     graph = f"graph_{lat}_{lon}_{dist}"
     cached = cache_get(graph)
     if cached is not None:
@@ -457,8 +502,8 @@ def fetch_features(point, dist, tags, name) -> GeoDataFrame | None:
     Returns:
         GeoDataFrame of features, or None if fetch fails
     """
-    lat, lon = point
-    tag_str = "_".join(tags.keys())
+    lat, lon = _round_coord(point[0]), _round_coord(point[1])
+    tag_str = "_".join(sorted(tags.keys()))
     features = f"{name}_{lat}_{lon}_{dist}_{tag_str}"
     cached = cache_get(features)
     if cached is not None:
@@ -479,6 +524,57 @@ def fetch_features(point, dist, tags, name) -> GeoDataFrame | None:
         return None
 
 
+def fetch_map_data(point: tuple, compensated_dist: float):
+    """
+    Fetch all OSM data required for poster generation.
+
+    Returns (graph, water, parks). Pass result as prefetched=(graph, water, parks)
+    to create_poster() to render multiple themes without re-downloading OSM data.
+
+    Args:
+        point: (latitude, longitude) tuple
+        compensated_dist: Adjusted distance in meters (accounting for poster aspect ratio)
+
+    Returns:
+        Tuple of (graph, water GeoDataFrame, parks GeoDataFrame)
+
+    Raises:
+        RuntimeError: If street network data cannot be retrieved
+    """
+    with tqdm(
+        total=3,
+        desc="Fetching map data",
+        unit="step",
+        bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt}",
+    ) as pbar:
+        pbar.set_description("Downloading street network")
+        g = fetch_graph(point, compensated_dist)
+        if g is None:
+            raise RuntimeError("Failed to retrieve street network data.")
+        pbar.update(1)
+
+        pbar.set_description("Downloading water features")
+        water = fetch_features(
+            point,
+            compensated_dist,
+            tags={"natural": ["water", "bay", "strait"], "waterway": "riverbank"},
+            name="water",
+        )
+        pbar.update(1)
+
+        pbar.set_description("Downloading parks/green spaces")
+        parks = fetch_features(
+            point,
+            compensated_dist,
+            tags={"leisure": "park", "landuse": "grass"},
+            name="parks",
+        )
+        pbar.update(1)
+
+    print("✓ All data retrieved successfully!")
+    return g, water, parks
+
+
 def create_poster(
     city,
     country,
@@ -493,6 +589,8 @@ def create_poster(
     display_city=None,
     display_country=None,
     fonts=None,
+    theme=None,
+    prefetched=None,
 ):
     """
     Generate a complete map poster with roads, water, parks, and typography.
@@ -510,11 +608,16 @@ def create_poster(
         width: Poster width in inches (default: 12)
         height: Poster height in inches (default: 16)
         country_label: Optional override for country text on poster
-        _name_label: Optional override for city name (unused, reserved for future use)
+        theme: Theme dict to use; falls back to global THEME if None
+        prefetched: Optional (graph, water, parks) tuple from fetch_map_data()
+                    to skip OSM downloads when rendering multiple themes
 
     Raises:
         RuntimeError: If street network data cannot be retrieved
     """
+    # Use explicit theme or fall back to global for backward compatibility
+    theme = theme or THEME
+
     # Handle display names for i18n support
     # Priority: display_city/display_country > name_label/country_label > city/country
     display_city = display_city or name_label or city
@@ -522,48 +625,18 @@ def create_poster(
 
     print(f"\nGenerating map for {city}, {country}...")
 
-    # Progress bar for data fetching
-    with tqdm(
-        total=3,
-        desc="Fetching map data",
-        unit="step",
-        bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt}",
-    ) as pbar:
-        # 1. Fetch Street Network
-        pbar.set_description("Downloading street network")
-        compensated_dist = dist * (max(height, width) / min(height, width)) / 4  # To compensate for viewport crop
-        g = fetch_graph(point, compensated_dist)
-        if g is None:
-            raise RuntimeError("Failed to retrieve street network data.")
-        pbar.update(1)
+    # 1. Acquire OSM data — from pre-fetched cache or fresh download
+    compensated_dist = dist * (max(height, width) / min(height, width)) / 4
+    if prefetched is not None:
+        g, water, parks = prefetched
+    else:
+        g, water, parks = fetch_map_data(point, compensated_dist)
 
-        # 2. Fetch Water Features
-        pbar.set_description("Downloading water features")
-        water = fetch_features(
-            point,
-            compensated_dist,
-            tags={"natural": ["water", "bay", "strait"], "waterway": "riverbank"},
-            name="water",
-        )
-        pbar.update(1)
-
-        # 3. Fetch Parks
-        pbar.set_description("Downloading parks/green spaces")
-        parks = fetch_features(
-            point,
-            compensated_dist,
-            tags={"leisure": "park", "landuse": "grass"},
-            name="parks",
-        )
-        pbar.update(1)
-
-    print("✓ All data retrieved successfully!")
-
-    # 2. Setup Plot
+    # 2. Setup Plot — use Figure API directly to avoid pyplot global state (thread-safe)
     print("Rendering map...")
-    fig, ax = plt.subplots(figsize=(width, height), facecolor=THEME["bg"])
-    ax.set_facecolor(THEME["bg"])
-    ax.set_position((0.0, 0.0, 1.0, 1.0))
+    fig = Figure(figsize=(width, height), facecolor=theme["bg"])
+    ax = fig.add_axes([0.0, 0.0, 1.0, 1.0])
+    ax.set_facecolor(theme["bg"])
 
     # Project graph to a metric CRS so distances and aspect are linear (meters)
     g_proj = ox.project_graph(g)
@@ -579,7 +652,7 @@ def create_poster(
                 water_polys = ox.projection.project_gdf(water_polys)
             except Exception:
                 water_polys = water_polys.to_crs(g_proj.graph['crs'])
-            water_polys.plot(ax=ax, facecolor=THEME['water'], edgecolor='none', zorder=0.5)
+            water_polys.plot(ax=ax, facecolor=theme['water'], edgecolor='none', zorder=0.5)
 
     if parks is not None and not parks.empty:
         # Filter to only polygon/multipolygon geometries to avoid point features showing as dots
@@ -590,17 +663,18 @@ def create_poster(
                 parks_polys = ox.projection.project_gdf(parks_polys)
             except Exception:
                 parks_polys = parks_polys.to_crs(g_proj.graph['crs'])
-            parks_polys.plot(ax=ax, facecolor=THEME['parks'], edgecolor='none', zorder=0.8)
+            parks_polys.plot(ax=ax, facecolor=theme['parks'], edgecolor='none', zorder=0.8)
+
     # Layer 2: Roads with hierarchy coloring
     print("Applying road hierarchy colors...")
-    edge_colors = get_edge_colors_by_type(g_proj)
+    edge_colors = get_edge_colors_by_type(g_proj, theme)
     edge_widths = get_edge_widths_by_type(g_proj)
 
     # Determine cropping limits to maintain the poster aspect ratio
     crop_xlim, crop_ylim = get_crop_limits(g_proj, point, fig, compensated_dist)
     # Plot the projected graph and then apply the cropped limits
     ox.plot_graph(
-        g_proj, ax=ax, bgcolor=THEME['bg'],
+        g_proj, ax=ax, bgcolor=theme['bg'],
         node_size=0,
         edge_color=edge_colors,
         edge_linewidth=edge_widths,
@@ -612,8 +686,8 @@ def create_poster(
     ax.set_ylim(crop_ylim)
 
     # Layer 3: Gradients (Top and Bottom)
-    create_gradient_fade(ax, THEME['gradient_color'], location='bottom', zorder=10)
-    create_gradient_fade(ax, THEME['gradient_color'], location='top', zorder=10)
+    create_gradient_fade(ax, theme['gradient_color'], location='bottom', zorder=10)
+    create_gradient_fade(ax, theme['gradient_color'], location='top', zorder=10)
 
     # Calculate scale factor based on smaller dimension (reference 12 inches)
     # This ensures text scales properly for both portrait and landscape orientations
@@ -686,7 +760,7 @@ def create_poster(
         0.14,
         spaced_city,
         transform=ax.transAxes,
-        color=THEME["text"],
+        color=theme["text"],
         ha="center",
         fontproperties=font_main_adjusted,
         zorder=11,
@@ -697,7 +771,7 @@ def create_poster(
         0.10,
         display_country.upper(),
         transform=ax.transAxes,
-        color=THEME["text"],
+        color=theme["text"],
         ha="center",
         fontproperties=font_sub,
         zorder=11,
@@ -717,7 +791,7 @@ def create_poster(
         0.07,
         coords,
         transform=ax.transAxes,
-        color=THEME["text"],
+        color=theme["text"],
         alpha=0.7,
         ha="center",
         fontproperties=font_coords,
@@ -728,7 +802,7 @@ def create_poster(
         [0.4, 0.6],
         [0.125, 0.125],
         transform=ax.transAxes,
-        color=THEME["text"],
+        color=theme["text"],
         linewidth=1 * scale_factor,
         zorder=11,
     )
@@ -744,7 +818,7 @@ def create_poster(
         0.02,
         "© OpenStreetMap contributors",
         transform=ax.transAxes,
-        color=THEME["text"],
+        color=theme["text"],
         alpha=0.5,
         ha="right",
         va="bottom",
@@ -757,7 +831,7 @@ def create_poster(
 
     fmt = output_format.lower()
     save_kwargs = dict(
-        facecolor=THEME["bg"],
+        facecolor=theme["bg"],
         bbox_inches="tight",
         pad_inches=0.05,
     )
@@ -766,9 +840,7 @@ def create_poster(
     if fmt == "png":
         save_kwargs["dpi"] = 300
 
-    plt.savefig(output_file, format=fmt, **save_kwargs)
-
-    plt.close()
+    fig.savefig(output_file, format=fmt, **save_kwargs)
     print(f"✓ Done! Poster saved as {output_file}")
 
 
@@ -1021,22 +1093,51 @@ Examples:
         else:
             coords = get_coordinates(args.city, args.country)
 
-        for theme_name in themes_to_generate:
+        if len(themes_to_generate) > 1:
+            # Pre-fetch OSM data once, then render all themes in parallel
+            compensated_dist = args.distance * (max(args.height, args.width) / min(args.height, args.width)) / 4
+            print(f"\nFetching OSM data once (shared across {len(themes_to_generate)} themes)...")
+            prefetched = fetch_map_data(tuple(coords), compensated_dist)
+
+            workers = min(4, len(themes_to_generate))
+            print(f"Rendering {len(themes_to_generate)} themes with {workers} parallel workers...\n")
+
+            def _render_theme(theme_name):
+                t = load_theme(theme_name)
+                out = generate_output_filename(args.city, theme_name, args.format)
+                create_poster(
+                    args.city, args.country, tuple(coords), args.distance,
+                    out, args.format, args.width, args.height,
+                    country_label=args.country_label,
+                    display_city=args.display_city,
+                    display_country=args.display_country,
+                    fonts=custom_fonts,
+                    theme=t,
+                    prefetched=prefetched,
+                )
+                return out
+
+            with ThreadPoolExecutor(max_workers=workers) as executor:
+                futures = {executor.submit(_render_theme, t): t for t in themes_to_generate}
+                for future in as_completed(futures):
+                    theme_name = futures[future]
+                    try:
+                        out = future.result()
+                        print(f"✓ {theme_name}: {out}")
+                    except Exception as exc:
+                        print(f"✗ {theme_name}: {exc}")
+        else:
+            theme_name = themes_to_generate[0]
             THEME = load_theme(theme_name)
             output_file = generate_output_filename(args.city, theme_name, args.format)
             create_poster(
-                args.city,
-                args.country,
-                coords,
-                args.distance,
-                output_file,
-                args.format,
-                args.width,
-                args.height,
+                args.city, args.country, tuple(coords), args.distance,
+                output_file, args.format, args.width, args.height,
                 country_label=args.country_label,
                 display_city=args.display_city,
                 display_country=args.display_country,
                 fonts=custom_fonts,
+                theme=THEME,
             )
 
         print("\n" + "=" * 50)
