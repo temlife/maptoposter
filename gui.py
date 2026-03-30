@@ -71,6 +71,7 @@ def do_generate(params, coords=None, prefetched=None):
 
     theme = cmp.load_theme(params["theme"])
     layers = params.get("layers") or None  # None → all layers
+    dpi = int(params.get("dpi", 300))
 
     fmt = params.get("format", "png")
     output_file = cmp.generate_output_filename(city, params["theme"], fmt)
@@ -90,6 +91,7 @@ def do_generate(params, coords=None, prefetched=None):
         theme=theme,
         prefetched=prefetched,
         layers=layers,
+        dpi=dpi,
     )
     return output_file
 
@@ -465,12 +467,20 @@ details.adv .adv-body{padding:12px;display:flex;flex-direction:column;gap:10px}
         <div class="field"><label for="height">Height (in)</label>
           <input id="height" type="number" value="16" min="4" max="20" step="0.5"></div>
       </div>
-      <div class="field"><label for="format">Output Format</label>
-        <select id="format">
-          <option value="png" selected>PNG (300 DPI)</option>
-          <option value="svg">SVG (vector)</option>
-          <option value="pdf">PDF (print)</option>
-        </select>
+      <div class="row">
+        <div class="field"><label for="format">Output Format</label>
+          <select id="format">
+            <option value="png" selected>PNG</option>
+            <option value="svg">SVG (vector)</option>
+            <option value="pdf">PDF (print)</option>
+          </select>
+        </div>
+        <div class="field"><label for="dpi">Quality</label>
+          <select id="dpi">
+            <option value="150">150 DPI — fast</option>
+            <option value="300" selected>300 DPI — print</option>
+          </select>
+        </div>
       </div>
       <!-- Map picker -->
       <div class="field">
@@ -632,6 +642,7 @@ async function generate(allThemes) {
     width: document.getElementById('width').value,
     height: document.getElementById('height').value,
     format: document.getElementById('format').value,
+    dpi: parseInt(document.getElementById('dpi').value),
     all_themes: allThemes,
   };
 

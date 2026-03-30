@@ -53,6 +53,10 @@ FILE_ENCODING = "utf-8"
 CACHE_TTL_DAYS = int(os.environ.get("CACHE_TTL_DAYS", "30"))
 CACHE_MAX_SIZE_MB = int(os.environ.get("CACHE_MAX_SIZE_MB", "500"))
 
+# In-memory cache to avoid repeated pickle.load from disk within the same process
+_mem_cache: dict = {}
+_MEM_CACHE_MAX = 64
+
 # OSM feature layers: name → tags dict for ox.features_from_point
 LAYER_TAGS: dict[str, dict] = {
     "water": {"natural": ["water", "bay", "strait"], "waterway": "riverbank"},
@@ -88,7 +92,8 @@ def _cache_path(key: str) -> str:
 
 def cache_get(key: str):
     """
-    Retrieve a cached object by key. Returns None if not found or expired.
+    Retrieve a cached object by key. Checks in-memory cache first, then disk.
+    Returns None if not found or expired.
 
     Args:
         key: Cache key identifier
@@ -99,16 +104,31 @@ def cache_get(key: str):
     Raises:
         CacheError: If cache read operation fails
     """
+    # 1. In-memory hit (avoids pickle.load from disk)
+    if key in _mem_cache:
+        entry = _mem_cache[key]
+        if isinstance(entry, _CacheEntry):
+            if (time.time() - entry.timestamp) / 86400 <= CACHE_TTL_DAYS:
+                return entry.data
+            del _mem_cache[key]
+        else:
+            return entry  # legacy
+
+    # 2. Disk hit
     try:
         path = _cache_path(key)
         if not os.path.exists(path):
             return None
         with open(path, "rb") as f:
             entry = pickle.load(f)
+        # Populate in-memory cache
+        if len(_mem_cache) >= _MEM_CACHE_MAX:
+            _mem_cache.pop(next(iter(_mem_cache)))
+        _mem_cache[key] = entry
         if isinstance(entry, _CacheEntry):
-            age_days = (time.time() - entry.timestamp) / 86400
-            if age_days > CACHE_TTL_DAYS:
+            if (time.time() - entry.timestamp) / 86400 > CACHE_TTL_DAYS:
                 os.remove(path)
+                del _mem_cache[key]
                 return None
             return entry.data
         # Legacy format without TTL: return as-is
@@ -119,7 +139,7 @@ def cache_get(key: str):
 
 def cache_set(key: str, value):
     """
-    Store an object in the cache with a timestamp for TTL support.
+    Store an object in the in-memory and disk cache with a timestamp for TTL support.
 
     Args:
         key: Cache key identifier
@@ -128,13 +148,19 @@ def cache_set(key: str, value):
     Raises:
         CacheError: If cache write operation fails
     """
+    entry = _CacheEntry(data=value, timestamp=time.time())
+    # Store in memory first
+    if len(_mem_cache) >= _MEM_CACHE_MAX:
+        _mem_cache.pop(next(iter(_mem_cache)))
+    _mem_cache[key] = entry
+    # Persist to disk
     try:
         if not os.path.exists(CACHE_DIR):
             os.makedirs(CACHE_DIR)
         _cache_evict_if_needed()
         path = _cache_path(key)
         with open(path, "wb") as f:
-            pickle.dump(_CacheEntry(data=value, timestamp=time.time()), f, protocol=pickle.HIGHEST_PROTOCOL)
+            pickle.dump(entry, f, protocol=pickle.HIGHEST_PROTOCOL)
     except Exception as e:
         raise CacheError(f"Cache write failed: {e}") from e
 
@@ -301,68 +327,52 @@ def create_gradient_fade(ax, color, location="bottom", zorder=10):
     )
 
 
-def get_edge_colors_by_type(g, theme):
-    """
-    Assigns colors to edges based on road type hierarchy.
-    Returns a list of colors corresponding to each edge in the graph.
-    """
-    edge_colors = []
+_EDGE_COLOR_MAP = {
+    "motorway": "road_motorway", "motorway_link": "road_motorway",
+    "trunk": "road_primary", "trunk_link": "road_primary",
+    "primary": "road_primary", "primary_link": "road_primary",
+    "secondary": "road_secondary", "secondary_link": "road_secondary",
+    "tertiary": "road_tertiary", "tertiary_link": "road_tertiary",
+    "residential": "road_residential", "living_street": "road_residential",
+    "unclassified": "road_residential",
+}
+_EDGE_WIDTH_MAP = {
+    "motorway": 1.2, "motorway_link": 1.2,
+    "trunk": 1.0, "trunk_link": 1.0, "primary": 1.0, "primary_link": 1.0,
+    "secondary": 0.8, "secondary_link": 0.8,
+    "tertiary": 0.6, "tertiary_link": 0.6,
+}
 
+
+def get_edge_colors_and_widths(g, theme):
+    """
+    Returns (colors, widths) lists for all edges in a single pass.
+    """
+    default_color = theme["road_default"]
+    colors, widths = [], []
     for _u, _v, data in g.edges(data=True):
-        # Get the highway type (can be a list or string)
-        highway = data.get('highway', 'unclassified')
+        hw = data.get("highway", "unclassified")
+        if isinstance(hw, list):
+            hw = hw[0] if hw else "unclassified"
+        colors.append(theme.get(_EDGE_COLOR_MAP.get(hw, ""), default_color))
+        widths.append(_EDGE_WIDTH_MAP.get(hw, 0.4))
+    return colors, widths
 
-        # Handle list of highway types (take the first one)
-        if isinstance(highway, list):
-            highway = highway[0] if highway else 'unclassified'
 
-        # Assign color based on road type
-        if highway in ["motorway", "motorway_link"]:
-            color = theme["road_motorway"]
-        elif highway in ["trunk", "trunk_link", "primary", "primary_link"]:
-            color = theme["road_primary"]
-        elif highway in ["secondary", "secondary_link"]:
-            color = theme["road_secondary"]
-        elif highway in ["tertiary", "tertiary_link"]:
-            color = theme["road_tertiary"]
-        elif highway in ["residential", "living_street", "unclassified"]:
-            color = theme["road_residential"]
-        else:
-            color = theme['road_default']
-
-        edge_colors.append(color)
-
-    return edge_colors
+# Keep individual functions as thin wrappers for backward compatibility
+def get_edge_colors_by_type(g, theme):
+    return get_edge_colors_and_widths(g, theme)[0]
 
 
 def get_edge_widths_by_type(g):
-    """
-    Assigns line widths to edges based on road type.
-    Major roads get thicker lines.
-    """
-    edge_widths = []
-
+    # Reuse the combined function with a minimal theme
+    widths = []
     for _u, _v, data in g.edges(data=True):
-        highway = data.get('highway', 'unclassified')
-
-        if isinstance(highway, list):
-            highway = highway[0] if highway else 'unclassified'
-
-        # Assign width based on road importance
-        if highway in ["motorway", "motorway_link"]:
-            width = 1.2
-        elif highway in ["trunk", "trunk_link", "primary", "primary_link"]:
-            width = 1.0
-        elif highway in ["secondary", "secondary_link"]:
-            width = 0.8
-        elif highway in ["tertiary", "tertiary_link"]:
-            width = 0.6
-        else:
-            width = 0.4
-
-        edge_widths.append(width)
-
-    return edge_widths
+        hw = data.get("highway", "unclassified")
+        if isinstance(hw, list):
+            hw = hw[0] if hw else "unclassified"
+        widths.append(_EDGE_WIDTH_MAP.get(hw, 0.4))
+    return widths
 
 
 def get_coordinates(city, country):
@@ -554,8 +564,10 @@ def fetch_map_data(point: tuple, compensated_dist: float, layers: list | None = 
     if layers is None:
         layers = DEFAULT_LAYERS
 
+    valid_layers = [(name, LAYER_TAGS[name]) for name in layers if name in LAYER_TAGS]
+
     with tqdm(
-        total=1 + len(layers),
+        total=1 + len(valid_layers),
         desc="Fetching map data",
         unit="step",
         bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt}",
@@ -567,13 +579,16 @@ def fetch_map_data(point: tuple, compensated_dist: float, layers: list | None = 
         pbar.update(1)
 
         features_dict: dict = {}
-        for layer in layers:
-            tags = LAYER_TAGS.get(layer)
-            if tags is None:
-                continue
-            pbar.set_description(f"Downloading {layer}")
-            features_dict[layer] = fetch_features(point, compensated_dist, tags=tags, name=layer)
-            pbar.update(1)
+        # Fetch all feature layers in parallel — each is an independent OSM query
+        with ThreadPoolExecutor(max_workers=len(valid_layers) or 1) as executor:
+            futures = {
+                executor.submit(fetch_features, point, compensated_dist, tags, name): name
+                for name, tags in valid_layers
+            }
+            for future in as_completed(futures):
+                name = futures[future]
+                features_dict[name] = future.result()
+                pbar.update(1)
 
     print("✓ All data retrieved successfully!")
     return g, features_dict
@@ -596,6 +611,7 @@ def create_poster(
     theme=None,
     prefetched=None,
     layers=None,
+    dpi=300,
 ):
     """
     Generate a complete map poster with roads, water, parks, and typography.
@@ -678,10 +694,9 @@ def create_poster(
             bld_color = theme.get('buildings', theme.get('road_residential', theme['road_tertiary']))
             _project_gdf(bld_polys).plot(ax=ax, facecolor=bld_color, edgecolor='none', alpha=0.5, zorder=0.9)
 
-    # Layer 2: Roads with hierarchy coloring
+    # Layer 2: Roads with hierarchy coloring (single pass for colors + widths)
     print("Applying road hierarchy colors...")
-    edge_colors = get_edge_colors_by_type(g_proj, theme)
-    edge_widths = get_edge_widths_by_type(g_proj)
+    edge_colors, edge_widths = get_edge_colors_and_widths(g_proj, theme)
 
     # Determine cropping limits to maintain the poster aspect ratio
     crop_xlim, crop_ylim = get_crop_limits(g_proj, point, fig, compensated_dist)
@@ -859,7 +874,7 @@ def create_poster(
 
     # DPI matters mainly for raster formats
     if fmt == "png":
-        save_kwargs["dpi"] = 300
+        save_kwargs["dpi"] = dpi
 
     fig.savefig(output_file, format=fmt, **save_kwargs)
     print(f"✓ Done! Poster saved as {output_file}")
