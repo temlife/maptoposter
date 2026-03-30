@@ -98,6 +98,7 @@ def do_generate(params, coords=None, prefetched=None):
         vignette=params.get("vignette", True),
         grain=params.get("grain", False),
         show_country=params.get("show_country", True),
+        show_coords=params.get("show_coords", True),
     )
     return output_file
 
@@ -550,7 +551,14 @@ details.sub .sub-body{display:flex;flex-direction:column;gap:12px;padding-bottom
             <input type="checkbox" id="show-country" checked>
             <div>
               <div class="fx-title">Show country name</div>
-              <div class="fx-desc">Uncheck to display only the city name and coordinates</div>
+              <div class="fx-desc">Uncheck to remove the country label from the poster</div>
+            </div>
+          </label>
+          <label class="fx-chip">
+            <input type="checkbox" id="show-coords" checked>
+            <div>
+              <div class="fx-title">Show coordinates</div>
+              <div class="fx-desc">Uncheck to hide the latitude/longitude line</div>
             </div>
           </label>
           <div class="field">
@@ -860,6 +868,7 @@ async function generate(allThemes) {
     vignette: document.getElementById('fx-vignette').checked,
     grain: document.getElementById('fx-grain').checked,
     show_country: document.getElementById('show-country').checked,
+    show_coords:  document.getElementById('show-coords').checked,
     all_themes: allThemes,
   };
 

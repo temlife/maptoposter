@@ -658,6 +658,7 @@ def create_poster(
     vignette=True,
     grain=False,
     show_country=True,
+    show_coords=True,
 ):
     """
     Generate a complete map poster with roads, water, parks, and typography.
@@ -832,19 +833,50 @@ def create_poster(
     else:
         font_main_adjusted = FontProperties(family="monospace", weight="bold", size=adjusted_font_size)
 
-    # Text block — positions depend on layout and whether tagline is present
-    # Spacing tightens slightly when tagline is present to fit everything
+    # Text block — positions adapt to which elements are visible.
+    # When country and/or coords are hidden, the city name shifts toward the
+    # vertical centre of the gradient zone so the layout stays balanced.
     has_tagline = bool(tagline)
+
+    # Build adaptive positions for the bottom layout zone (≈ 0.05–0.17) or
+    # top layout zone (≈ 0.83–0.95).  We compute a list of visible "slots"
+    # and space them evenly within the zone.
+    #
+    # Slot order (bottom, innermost→outermost):
+    #   city  [sep]  country  [tagline]  coords
+    # For top layout the order is reversed (outermost→innermost).
+
     if layout == "top":
-        if has_tagline:
-            y_city, y_sep, y_country, y_tagline, y_coords = 0.845, 0.862, 0.882, 0.905, 0.926
-        else:
-            y_city, y_sep, y_country, y_coords = 0.855, 0.873, 0.896, 0.922
-    else:  # bottom
-        if has_tagline:
-            y_city, y_sep, y_country, y_tagline, y_coords = 0.155, 0.138, 0.115, 0.090, 0.065
-        else:
-            y_city, y_sep, y_country, y_coords = 0.140, 0.125, 0.100, 0.070
+        zone_inner, zone_outer = 0.855, 0.930  # inner = closer to map edge
+        sign = 1  # slots go upward (increasing y)
+    else:
+        zone_inner, zone_outer = 0.145, 0.060  # inner = closer to map edge
+        sign = -1  # slots go downward (decreasing y)
+
+    # Collect active slots as (name, spacing_weight) — city always first
+    slots: list[str] = ["city"]
+    if show_country:
+        slots.append("sep")
+        slots.append("country")
+    if has_tagline:
+        slots.append("tagline")
+    if show_coords:
+        slots.append("coords")
+
+    # Assign evenly-spaced y positions within the zone
+    n_gaps = max(len(slots) - 1, 1)
+    step = (zone_outer - zone_inner) / n_gaps
+
+    pos: dict[str, float] = {}
+    for i, slot in enumerate(slots):
+        pos[slot] = zone_inner + sign * i * abs(step)
+
+    # Fallback keys so sep/tagline/coords always have a value even if unused
+    y_city = pos["city"]
+    y_sep = pos.get("sep", zone_inner + sign * abs(step))
+    y_country = pos.get("country", zone_inner + sign * 2 * abs(step))
+    y_tagline = pos.get("tagline", y_country + sign * abs(step))
+    y_coords = pos.get("coords", zone_outer)
 
     ax.text(0.5, y_city, spaced_city,
             transform=ax.transAxes, color=theme["text"], ha="center",
@@ -860,13 +892,14 @@ def create_poster(
                 transform=ax.transAxes, color=theme["text"], ha="center",
                 alpha=0.75, fontproperties=font_tagline, zorder=11)
 
-    lat, lon = point
-    coords_str = (
-        f"{lat:.4f}° {'N' if lat >= 0 else 'S'} / {abs(lon):.4f}° {'E' if lon >= 0 else 'W'}"
-    )
-    ax.text(0.5, y_coords, coords_str,
-            transform=ax.transAxes, color=theme["text"], alpha=0.7, ha="center",
-            fontproperties=font_coords, zorder=11)
+    if show_coords:
+        lat, lon = point
+        coords_str = (
+            f"{lat:.4f}° {'N' if lat >= 0 else 'S'} / {abs(lon):.4f}° {'E' if lon >= 0 else 'W'}"
+        )
+        ax.text(0.5, y_coords, coords_str,
+                transform=ax.transAxes, color=theme["text"], alpha=0.7, ha="center",
+                fontproperties=font_coords, zorder=11)
 
     # Separator between city name and country (only when country is visible)
     if not show_country:
