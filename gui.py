@@ -92,6 +92,11 @@ def do_generate(params, coords=None, prefetched=None):
         prefetched=prefetched,
         layers=layers,
         dpi=dpi,
+        layout=params.get("layout", "bottom"),
+        tagline=params.get("tagline") or None,
+        separator=params.get("separator", "line"),
+        vignette=params.get("vignette", True),
+        grain=params.get("grain", False),
     )
     return output_file
 
@@ -376,7 +381,7 @@ details.adv .adv-body{padding:12px;display:flex;flex-direction:column;gap:10px}
 /* Map picker */
 #coord-map{height:200px;border-radius:var(--r);border:1px solid var(--border);margin-top:4px;z-index:0}
 
-/* Layer toggles */
+/* Layer toggles + layout pills (shared pill style) */
 .layer-row{display:flex;flex-wrap:wrap;gap:5px;margin-top:4px}
 .layer-chip{display:flex;align-items:center;gap:4px;padding:4px 10px;
   border:1.5px solid var(--border);border-radius:20px;font-size:.78rem;
@@ -384,6 +389,24 @@ details.adv .adv-body{padding:12px;display:flex;flex-direction:column;gap:10px}
 .layer-chip input{display:none}
 .layer-chip:has(input:checked){border-color:var(--accent);background:color-mix(in srgb,var(--accent) 8%,transparent)}
 .layer-chip:hover{border-color:var(--accent)}
+
+/* Layout pills (radio) */
+.layout-row{display:flex;gap:5px;margin-top:4px}
+.layout-pill{flex:1;display:flex;align-items:center;justify-content:center;gap:5px;
+  padding:5px 6px;border:1.5px solid var(--border);border-radius:20px;font-size:.75rem;
+  cursor:pointer;transition:border-color .15s,background .15s;user-select:none;text-align:center}
+.layout-pill input{display:none}
+.layout-pill:has(input:checked){border-color:var(--accent);background:color-mix(in srgb,var(--accent) 8%,transparent)}
+.layout-pill:hover{border-color:var(--accent)}
+
+/* Effects toggles (inline row) */
+.effects-row{display:flex;gap:8px;margin-top:4px}
+.fx-chip{display:flex;align-items:center;gap:4px;padding:4px 10px;
+  border:1.5px solid var(--border);border-radius:20px;font-size:.78rem;
+  cursor:pointer;transition:border-color .15s,background .15s;user-select:none}
+.fx-chip input{display:none}
+.fx-chip:has(input:checked){border-color:var(--accent);background:color-mix(in srgb,var(--accent) 8%,transparent)}
+.fx-chip:hover{border-color:var(--accent)}
 
 /* Responsive */
 @media(max-width:760px){
@@ -410,13 +433,19 @@ details.adv .adv-body{padding:12px;display:flex;flex-direction:column;gap:10px}
 
   <!-- Location (required) -->
   <div style="display:flex;flex-direction:column;gap:10px">
-    <div class="field">
-      <label for="city">City *</label>
-      <input id="city" type="text" placeholder="e.g. Paris">
+    <div class="row">
+      <div class="field">
+        <label for="city">City *</label>
+        <input id="city" type="text" placeholder="e.g. Paris">
+      </div>
+      <div class="field">
+        <label for="country">Country *</label>
+        <input id="country" type="text" placeholder="e.g. France">
+      </div>
     </div>
     <div class="field">
-      <label for="country">Country *</label>
-      <input id="country" type="text" placeholder="e.g. France">
+      <input id="tagline" type="text" placeholder='Tagline (optional) — e.g. "The City of Lights"'
+             style="font-size:.8rem;font-style:italic">
     </div>
   </div>
 
@@ -436,6 +465,7 @@ details.adv .adv-body{padding:12px;display:flex;flex-direction:column;gap:10px}
     <div class="layer-row">
       <label class="layer-chip"><input type="checkbox" value="water" checked> Water</label>
       <label class="layer-chip"><input type="checkbox" value="parks" checked> Parks</label>
+      <label class="layer-chip"><input type="checkbox" value="landuse"> Land use</label>
       <label class="layer-chip"><input type="checkbox" value="buildings" checked> Buildings</label>
       <label class="layer-chip"><input type="checkbox" value="railways" checked> Railways</label>
     </div>
@@ -460,6 +490,31 @@ details.adv .adv-body{padding:12px;display:flex;flex-direction:column;gap:10px}
   <details class="adv">
     <summary>Advanced options</summary>
     <div class="adv-body">
+      <!-- Layout -->
+      <div class="field">
+        <label>Text layout</label>
+        <div class="layout-row">
+          <label class="layout-pill"><input type="radio" name="layout" value="bottom" checked> ⬇ Bottom</label>
+          <label class="layout-pill"><input type="radio" name="layout" value="top"> ⬆ Top</label>
+        </div>
+      </div>
+      <!-- Separator style -->
+      <div class="field">
+        <label>Separator</label>
+        <div class="layer-row">
+          <label class="layer-chip"><input type="radio" name="separator" value="line" checked> Line</label>
+          <label class="layer-chip"><input type="radio" name="separator" value="double"> Double</label>
+          <label class="layer-chip"><input type="radio" name="separator" value="dots"> Dots</label>
+        </div>
+      </div>
+      <!-- Visual effects -->
+      <div class="field">
+        <label>Visual effects</label>
+        <div class="effects-row">
+          <label class="fx-chip"><input type="checkbox" id="fx-vignette" checked> Vignette</label>
+          <label class="fx-chip"><input type="checkbox" id="fx-grain"> Grain</label>
+        </div>
+      </div>
       <!-- Dimensions -->
       <div class="row">
         <div class="field"><label for="width">Width (in)</label>
@@ -630,6 +685,7 @@ async function generate(allThemes) {
 
   const payload = {
     city, country,
+    tagline: document.getElementById('tagline').value.trim(),
     latitude: document.getElementById('latitude').value.trim(),
     longitude: document.getElementById('longitude').value.trim(),
     distance: distSlider.value,
@@ -643,6 +699,10 @@ async function generate(allThemes) {
     height: document.getElementById('height').value,
     format: document.getElementById('format').value,
     dpi: parseInt(document.getElementById('dpi').value),
+    layout: document.querySelector('input[name="layout"]:checked')?.value || 'bottom',
+    separator: document.querySelector('input[name="separator"]:checked')?.value || 'line',
+    vignette: document.getElementById('fx-vignette').checked,
+    grain: document.getElementById('fx-grain').checked,
     all_themes: allThemes,
   };
 

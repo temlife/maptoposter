@@ -61,10 +61,12 @@ _MEM_CACHE_MAX = 64
 LAYER_TAGS: dict[str, dict] = {
     "water": {"natural": ["water", "bay", "strait"], "waterway": "riverbank"},
     "parks": {"leisure": "park", "landuse": "grass"},
+    "landuse": {"landuse": ["residential", "retail", "commercial", "industrial"]},
     "buildings": {"building": True},
     "railways": {"railway": ["rail", "subway", "light_rail", "tram"]},
 }
-DEFAULT_LAYERS = list(LAYER_TAGS.keys())
+# Default layers fetched when none specified (CLI). "landuse" is opt-in via GUI.
+DEFAULT_LAYERS = ["water", "parks", "buildings", "railways"]
 
 
 @dataclass
@@ -327,6 +329,40 @@ def create_gradient_fade(ax, color, location="bottom", zorder=10):
     )
 
 
+def _darken_color(hex_color: str, amount: float = 0.18) -> tuple:
+    """Return a slightly darkened version of a hex color as an RGB tuple."""
+    r, g, b = mcolors.to_rgb(hex_color)
+    return (max(0.0, r - amount), max(0.0, g - amount), max(0.0, b - amount))
+
+
+def add_vignette(ax, xlim, ylim, color: str, strength: float = 0.55):
+    """Radial darkening toward edges — gives a 'focused lens' poster look."""
+    size = 256
+    x = np.linspace(-1, 1, size)
+    y = np.linspace(-1, 1, size)
+    X, Y = np.meshgrid(x, y)
+    r = np.sqrt((X * 0.85) ** 2 + (Y * 0.85) ** 2)
+    alpha = np.clip(r ** 2 * strength, 0, 0.80)
+    rgb = mcolors.to_rgb(color)
+    img = np.zeros((size, size, 4))
+    img[:, :, :3] = rgb
+    img[:, :, 3] = alpha
+    ax.imshow(img, extent=[xlim[0], xlim[1], ylim[0], ylim[1]],
+              aspect="auto", zorder=9, interpolation="bilinear", origin="lower")
+
+
+def add_grain(ax, xlim, ylim, strength: float = 0.05):
+    """Paper/film grain overlay — adds an organic, printed texture."""
+    rng = np.random.default_rng(42)  # fixed seed → reproducible output
+    size = 512
+    noise = rng.standard_normal((size, size))
+    alpha = np.clip(np.abs(noise) * strength, 0, 0.10)
+    img = np.zeros((size, size, 4))  # black grain dots
+    img[:, :, 3] = alpha
+    ax.imshow(img, extent=[xlim[0], xlim[1], ylim[0], ylim[1]],
+              aspect="auto", zorder=8, interpolation="nearest", origin="lower")
+
+
 _EDGE_COLOR_MAP = {
     "motorway": "road_motorway", "motorway_link": "road_motorway",
     "trunk": "road_primary", "trunk_link": "road_primary",
@@ -344,10 +380,14 @@ _EDGE_WIDTH_MAP = {
 }
 
 
-def get_edge_colors_and_widths(g, theme):
+def get_edge_colors_and_widths(g, theme, dist: float = 18000):
     """
     Returns (colors, widths) lists for all edges in a single pass.
+    Road widths scale with the map radius so small areas look as
+    detailed as large ones.
     """
+    # Narrower dist → thicker lines (more detail visible); clamp to [0.5, 2.0]
+    width_scale = max(0.5, min(2.0, 15000 / dist))
     default_color = theme["road_default"]
     colors, widths = [], []
     for _u, _v, data in g.edges(data=True):
@@ -355,7 +395,7 @@ def get_edge_colors_and_widths(g, theme):
         if isinstance(hw, list):
             hw = hw[0] if hw else "unclassified"
         colors.append(theme.get(_EDGE_COLOR_MAP.get(hw, ""), default_color))
-        widths.append(_EDGE_WIDTH_MAP.get(hw, 0.4))
+        widths.append(_EDGE_WIDTH_MAP.get(hw, 0.4) * width_scale)
     return colors, widths
 
 
@@ -612,6 +652,11 @@ def create_poster(
     prefetched=None,
     layers=None,
     dpi=300,
+    layout="bottom",
+    tagline=None,
+    separator="line",
+    vignette=True,
+    grain=False,
 ):
     """
     Generate a complete map poster with roads, water, parks, and typography.
@@ -674,35 +719,44 @@ def create_poster(
 
     # 3. Plot Layers
     # Layer 1: Polygons (filter to only plot polygon/multipolygon geometries, not points)
+    # Layer 1a: Land use (subtle urban texture, below everything else)
+    landuse = features_dict.get("landuse")
+    if landuse is not None and not landuse.empty:
+        lu_polys = landuse[landuse.geometry.type.isin(["Polygon", "MultiPolygon"])]
+        if not lu_polys.empty:
+            lu_color = theme.get("landuse", _darken_color(theme["bg"], 0.04))
+            _project_gdf(lu_polys).plot(ax=ax, facecolor=lu_color, edgecolor="none", alpha=0.6, zorder=0.2)
+
     water = features_dict.get("water")
     if water is not None and not water.empty:
         water_polys = water[water.geometry.type.isin(["Polygon", "MultiPolygon"])]
         if not water_polys.empty:
-            _project_gdf(water_polys).plot(ax=ax, facecolor=theme['water'], edgecolor='none', zorder=0.5)
+            water_edge = theme.get("water_edge", _darken_color(theme["water"], 0.12))
+            _project_gdf(water_polys).plot(
+                ax=ax, facecolor=theme["water"], edgecolor=water_edge, linewidth=0.6, zorder=0.5
+            )
 
     parks = features_dict.get("parks")
     if parks is not None and not parks.empty:
         parks_polys = parks[parks.geometry.type.isin(["Polygon", "MultiPolygon"])]
         if not parks_polys.empty:
-            _project_gdf(parks_polys).plot(ax=ax, facecolor=theme['parks'], edgecolor='none', zorder=0.8)
+            _project_gdf(parks_polys).plot(ax=ax, facecolor=theme["parks"], edgecolor="none", zorder=0.8)
 
     buildings = features_dict.get("buildings")
     if buildings is not None and not buildings.empty:
         bld_polys = buildings[buildings.geometry.type.isin(["Polygon", "MultiPolygon"])]
         if not bld_polys.empty:
-            # Derive building color: slightly darker than bg, very subtle
-            bld_color = theme.get('buildings', theme.get('road_residential', theme['road_tertiary']))
-            _project_gdf(bld_polys).plot(ax=ax, facecolor=bld_color, edgecolor='none', alpha=0.5, zorder=0.9)
+            bld_color = theme.get("buildings", theme.get("road_residential", theme["road_tertiary"]))
+            _project_gdf(bld_polys).plot(ax=ax, facecolor=bld_color, edgecolor="none", alpha=0.5, zorder=0.9)
 
     # Layer 2: Roads with hierarchy coloring (single pass for colors + widths)
     print("Applying road hierarchy colors...")
-    edge_colors, edge_widths = get_edge_colors_and_widths(g_proj, theme)
+    edge_colors, edge_widths = get_edge_colors_and_widths(g_proj, theme, dist=compensated_dist)
 
     # Determine cropping limits to maintain the poster aspect ratio
     crop_xlim, crop_ylim = get_crop_limits(g_proj, point, fig, compensated_dist)
-    # Plot the projected graph and then apply the cropped limits
     ox.plot_graph(
-        g_proj, ax=ax, bgcolor=theme['bg'],
+        g_proj, ax=ax, bgcolor=theme["bg"],
         node_size=0,
         edge_color=edge_colors,
         edge_linewidth=edge_widths,
@@ -713,135 +767,114 @@ def create_poster(
     ax.set_xlim(crop_xlim)
     ax.set_ylim(crop_ylim)
 
-    # Layer 2b: Railways (rendered on top of roads as thin lines)
+    # Layer 2b: Railways
     railways = features_dict.get("railways")
     if railways is not None and not railways.empty:
         rail_lines = railways[railways.geometry.type.isin(["LineString", "MultiLineString"])]
         if not rail_lines.empty:
-            rail_color = theme.get('railways', theme.get('road_primary', '#888'))
+            rail_color = theme.get("railways", theme.get("road_primary", "#888"))
             _project_gdf(rail_lines).plot(ax=ax, color=rail_color, linewidth=0.8, alpha=0.7, zorder=2.5)
 
-    # Layer 3: Gradients (Top and Bottom)
-    create_gradient_fade(ax, theme['gradient_color'], location='bottom', zorder=10)
-    create_gradient_fade(ax, theme['gradient_color'], location='top', zorder=10)
+    # Layer 3: Gradients — text side gets the strong fade, opposite gets a thin frame fade
+    if layout == "top":
+        create_gradient_fade(ax, theme["gradient_color"], location="top", zorder=10)
+        create_gradient_fade(ax, theme["gradient_color"], location="bottom", zorder=10)
+    else:  # bottom (default)
+        create_gradient_fade(ax, theme["gradient_color"], location="bottom", zorder=10)
+        create_gradient_fade(ax, theme["gradient_color"], location="top", zorder=10)
 
-    # Calculate scale factor based on smaller dimension (reference 12 inches)
-    # This ensures text scales properly for both portrait and landscape orientations
+    # Layer 4: Vignette + grain (applied after crop limits are set)
+    if vignette:
+        add_vignette(ax, crop_xlim, crop_ylim, theme.get("gradient_color", theme["bg"]))
+    if grain:
+        add_grain(ax, crop_xlim, crop_ylim)
+
+    # 4. Typography
     scale_factor = min(height, width) / 12.0
-
-    # Base font sizes (at 12 inches width)
     base_main = 60
     base_sub = 22
     base_coords = 14
     base_attr = 8
 
-    # 4. Typography - use custom fonts if provided, otherwise use default FONTS
     active_fonts = fonts or FONTS
     if active_fonts:
-        # font_main is calculated dynamically later based on length
-        font_sub = FontProperties(
-            fname=active_fonts["light"], size=base_sub * scale_factor
-        )
-        font_coords = FontProperties(
-            fname=active_fonts["regular"], size=base_coords * scale_factor
-        )
-        font_attr = FontProperties(
-            fname=active_fonts["light"], size=base_attr * scale_factor
-        )
+        font_sub = FontProperties(fname=active_fonts["light"], size=base_sub * scale_factor)
+        font_coords = FontProperties(fname=active_fonts["regular"], size=base_coords * scale_factor)
+        font_attr = FontProperties(fname=active_fonts["light"], size=base_attr * scale_factor)
+        if tagline:
+            font_tagline = FontProperties(fname=active_fonts["light"], size=base_sub * 0.75 * scale_factor)
     else:
-        # Fallback to system fonts
-        font_sub = FontProperties(
-            family="monospace", weight="normal", size=base_sub * scale_factor
-        )
-        font_coords = FontProperties(
-            family="monospace", size=base_coords * scale_factor
-        )
+        font_sub = FontProperties(family="monospace", weight="normal", size=base_sub * scale_factor)
+        font_coords = FontProperties(family="monospace", size=base_coords * scale_factor)
         font_attr = FontProperties(family="monospace", size=base_attr * scale_factor)
+        if tagline:
+            font_tagline = FontProperties(family="monospace", style="italic", size=base_sub * 0.75 * scale_factor)
 
-    # Format city name based on script type
-    # Latin scripts: apply uppercase and letter spacing for aesthetic
-    # Non-Latin scripts (CJK, Thai, Arabic, etc.): no spacing, preserve case structure
     if is_latin_script(display_city):
-        # Latin script: uppercase with letter spacing (e.g., "P  A  R  I  S")
         spaced_city = "  ".join(list(display_city.upper()))
     else:
-        # Non-Latin script: no spacing, no forced uppercase
-        # For scripts like Arabic, Thai, Japanese, etc.
         spaced_city = display_city
 
-    # Dynamically adjust font size based on city name length to prevent truncation
-    # We use the already scaled "main" font size as the starting point.
     base_adjusted_main = base_main * scale_factor
     city_char_count = len(display_city)
-
-    # Heuristic: If length is > 10, start reducing.
     if city_char_count > 10:
-        length_factor = 10 / city_char_count
-        adjusted_font_size = max(base_adjusted_main * length_factor, 10 * scale_factor)
+        adjusted_font_size = max(base_adjusted_main * (10 / city_char_count), 10 * scale_factor)
     else:
         adjusted_font_size = base_adjusted_main
 
     if active_fonts:
-        font_main_adjusted = FontProperties(
-            fname=active_fonts["bold"], size=adjusted_font_size
-        )
+        font_main_adjusted = FontProperties(fname=active_fonts["bold"], size=adjusted_font_size)
     else:
-        font_main_adjusted = FontProperties(
-            family="monospace", weight="bold", size=adjusted_font_size
-        )
+        font_main_adjusted = FontProperties(family="monospace", weight="bold", size=adjusted_font_size)
 
-    # --- BOTTOM TEXT ---
-    ax.text(
-        0.5,
-        0.14,
-        spaced_city,
-        transform=ax.transAxes,
-        color=theme["text"],
-        ha="center",
-        fontproperties=font_main_adjusted,
-        zorder=11,
-    )
+    # Text block — positions depend on layout and whether tagline is present
+    # Spacing tightens slightly when tagline is present to fit everything
+    has_tagline = bool(tagline)
+    if layout == "top":
+        if has_tagline:
+            y_city, y_sep, y_country, y_tagline, y_coords = 0.845, 0.862, 0.882, 0.905, 0.926
+        else:
+            y_city, y_sep, y_country, y_coords = 0.855, 0.873, 0.896, 0.922
+    else:  # bottom
+        if has_tagline:
+            y_city, y_sep, y_country, y_tagline, y_coords = 0.155, 0.138, 0.115, 0.090, 0.065
+        else:
+            y_city, y_sep, y_country, y_coords = 0.140, 0.125, 0.100, 0.070
 
-    ax.text(
-        0.5,
-        0.10,
-        display_country.upper(),
-        transform=ax.transAxes,
-        color=theme["text"],
-        ha="center",
-        fontproperties=font_sub,
-        zorder=11,
-    )
+    ax.text(0.5, y_city, spaced_city,
+            transform=ax.transAxes, color=theme["text"], ha="center",
+            fontproperties=font_main_adjusted, zorder=11)
+
+    ax.text(0.5, y_country, display_country.upper(),
+            transform=ax.transAxes, color=theme["text"], ha="center",
+            fontproperties=font_sub, zorder=11)
+
+    if has_tagline:
+        ax.text(0.5, y_tagline, tagline,
+                transform=ax.transAxes, color=theme["text"], ha="center",
+                alpha=0.75, fontproperties=font_tagline, zorder=11)
 
     lat, lon = point
-    coords = (
-        f"{lat:.4f}° N / {lon:.4f}° E"
-        if lat >= 0
-        else f"{abs(lat):.4f}° S / {lon:.4f}° E"
+    coords_str = (
+        f"{lat:.4f}° {'N' if lat >= 0 else 'S'} / {abs(lon):.4f}° {'E' if lon >= 0 else 'W'}"
     )
-    if lon < 0:
-        coords = coords.replace("E", "W")
+    ax.text(0.5, y_coords, coords_str,
+            transform=ax.transAxes, color=theme["text"], alpha=0.7, ha="center",
+            fontproperties=font_coords, zorder=11)
 
-    ax.text(
-        0.5,
-        0.07,
-        coords,
-        transform=ax.transAxes,
-        color=theme["text"],
-        alpha=0.7,
-        ha="center",
-        fontproperties=font_coords,
-        zorder=11,
-    )
-
-    ax.plot(
-        [0.4, 0.6],
-        [0.125, 0.125],
-        transform=ax.transAxes,
-        color=theme["text"],
-        linewidth=1 * scale_factor,
-        zorder=11,
-    )
+    # Separator between city name and country
+    if separator == "dots":
+        for dx in [-0.06, -0.03, 0, 0.03, 0.06]:
+            ax.plot([0.5 + dx], [y_sep], "o", transform=ax.transAxes,
+                    color=theme["text"], markersize=2.0 * scale_factor, zorder=11)
+    elif separator == "double":
+        gap = 0.006
+        for dy in (-gap, gap):
+            ax.plot([0.4, 0.6], [y_sep + dy, y_sep + dy], transform=ax.transAxes,
+                    color=theme["text"], linewidth=0.6 * scale_factor, alpha=0.85, zorder=11)
+    else:  # "line" (default)
+        ax.plot([0.4, 0.6], [y_sep, y_sep], transform=ax.transAxes,
+                color=theme["text"], linewidth=1 * scale_factor, zorder=11)
 
     # --- ATTRIBUTION (bottom right) ---
     if FONTS:
