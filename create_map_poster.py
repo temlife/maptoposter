@@ -761,6 +761,17 @@ def create_poster(
 
     # Determine cropping limits to maintain the poster aspect ratio
     crop_xlim, crop_ylim = get_crop_limits(g_proj, point, fig, compensated_dist)
+
+    # Shift the viewport so the city centre sits above the text zone rather
+    # than visually centred behind it.  We nudge the crop window toward the
+    # text side (down for bottom layout, up for top) so more map is visible
+    # on the opposite side.  10% of the half-height is a subtle but clear shift.
+    _half_h = (crop_ylim[1] - crop_ylim[0]) / 2
+    _shift = _half_h * 0.18
+    if layout == "top":
+        crop_ylim = (crop_ylim[0] + _shift, crop_ylim[1] + _shift)
+    else:
+        crop_ylim = (crop_ylim[0] - _shift, crop_ylim[1] - _shift)
     ox.plot_graph(
         g_proj, ax=ax, bgcolor=theme["bg"],
         node_size=0,
@@ -850,7 +861,7 @@ def create_poster(
         zone_inner, zone_outer = 0.855, 0.930  # inner = closer to map edge
         sign = 1  # slots go away from map (increasing y)
     else:
-        zone_inner, zone_outer = 0.145, 0.060  # inner = closer to map edge
+        zone_inner, zone_outer = 0.125, 0.042  # inner = closer to map edge
         sign = -1  # slots go away from map (decreasing y)
 
     # Collect active slots — city always first, then outward
