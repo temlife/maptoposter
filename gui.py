@@ -480,15 +480,37 @@ details.sub .sub-body{display:flex;flex-direction:column;gap:12px;padding-bottom
   <!-- ── LOCATION ── -->
   <div>
     <div class="section-label">Location</div>
-    <div class="row" style="margin-top:8px">
-      <div class="field">
-        <label for="city">City *</label>
-        <input id="city" type="text" placeholder="e.g. Paris">
+    <div style="display:flex;flex-direction:column;gap:10px;margin-top:8px">
+      <div class="row">
+        <div class="field">
+          <label for="city">City *</label>
+          <input id="city" type="text" placeholder="e.g. Paris">
+        </div>
+        <div class="field">
+          <label for="country">Country *</label>
+          <input id="country" type="text" placeholder="e.g. France">
+        </div>
       </div>
-      <div class="field">
-        <label for="country">Country *</label>
-        <input id="country" type="text" placeholder="e.g. France">
-      </div>
+      <!-- Map centre toggle (replaces former "Advanced" map picker) -->
+      <details class="sub" id="coords-details">
+        <summary>Map centre point</summary>
+        <div class="sub-body">
+          <div id="coord-map"></div>
+          <div class="row" style="margin-top:6px">
+            <div class="field"><label for="latitude">Latitude</label>
+              <input id="latitude" type="text" placeholder="auto-detect"></div>
+            <div class="field"><label for="longitude">Longitude</label>
+              <input id="longitude" type="text" placeholder="auto-detect"></div>
+          </div>
+          <div style="display:flex;justify-content:space-between;align-items:center">
+            <div class="hint">Click the map to pin the centre, or leave blank to geocode from the city name.</div>
+            <button type="button" onclick="clearCoords()"
+                    style="font-size:.7rem;color:var(--muted);background:none;border:none;cursor:pointer;text-decoration:underline;padding:0;flex-shrink:0;margin-left:8px">
+              Clear
+            </button>
+          </div>
+        </div>
+      </details>
     </div>
   </div>
 
@@ -517,13 +539,13 @@ details.sub .sub-body{display:flex;flex-direction:column;gap:12px;padding-bottom
     </div>
   </div>
 
-  <!-- ── APPEARANCE ── -->
+  <!-- ── STYLE ── -->
   <div>
-    <div class="section-label">Appearance</div>
+    <div class="section-label">Style</div>
     <div style="display:flex;flex-direction:column;gap:0;margin-top:8px">
 
       <!-- Theme -->
-      <div class="field" style="margin-bottom:12px">
+      <div class="field" style="margin-bottom:14px">
         <label>Theme — colour palette for the poster</label>
         <div class="theme-grid" id="theme-grid" style="margin-top:6px">
           {% for key, t in themes.items() %}
@@ -537,9 +559,30 @@ details.sub .sub-body{display:flex;flex-direction:column;gap:12px;padding-bottom
         <div class="theme-hint" id="theme-hint" style="margin-top:5px">{{ themes.get('terracotta',{}).get('description','') }}</div>
       </div>
 
-      <!-- Sub: Poster text -->
+      <!-- Visual effects (inline — no sub-accordion) -->
+      <div class="field" style="margin-bottom:14px">
+        <label>Visual effects</label>
+        <div style="display:flex;flex-direction:column;gap:6px;margin-top:6px">
+          <label class="fx-chip">
+            <input type="checkbox" id="fx-vignette" checked>
+            <div>
+              <div class="fx-title">Vignette</div>
+              <div class="fx-desc">Darkens the edges for a polished print look</div>
+            </div>
+          </label>
+          <label class="fx-chip">
+            <input type="checkbox" id="fx-grain">
+            <div>
+              <div class="fx-title">Grain</div>
+              <div class="fx-desc">Adds a subtle paper texture — handcrafted feel</div>
+            </div>
+          </label>
+        </div>
+      </div>
+
+      <!-- Sub: Text & layout -->
       <details class="sub">
-        <summary>Poster text</summary>
+        <summary>Text &amp; layout</summary>
         <div class="sub-body">
           <div class="field">
             <label for="tagline">Tagline <span style="font-weight:400;color:var(--muted)">(optional)</span></label>
@@ -548,7 +591,7 @@ details.sub .sub-body{display:flex;flex-direction:column;gap:12px;padding-bottom
             <div class="hint">A short subtitle printed below the country name on the poster.</div>
           </div>
           <label class="fx-chip">
-            <input type="checkbox" id="show-country" checked>
+            <input type="checkbox" id="show-country" checked onchange="toggleSeparator()">
             <div>
               <div class="fx-title">Show country name</div>
               <div class="fx-desc">Uncheck to remove the country label from the poster</div>
@@ -596,7 +639,8 @@ details.sub .sub-body{display:flex;flex-direction:column;gap:12px;padding-bottom
               </label>
             </div>
           </div>
-          <div class="field">
+          <!-- Separator: hidden when "Show country" is unchecked -->
+          <div class="field" id="separator-field">
             <label>Separator — decorative line between city and country</label>
             <div class="layer-row" style="margin-top:4px">
               <label class="layer-chip"><input type="radio" name="separator" value="line" checked>
@@ -610,38 +654,16 @@ details.sub .sub-body{display:flex;flex-direction:column;gap:12px;padding-bottom
         </div>
       </details>
 
-      <!-- Sub: Visual effects -->
-      <details class="sub">
-        <summary>Visual effects</summary>
-        <div class="sub-body">
-          <label class="fx-chip">
-            <input type="checkbox" id="fx-vignette" checked>
-            <div>
-              <div class="fx-title">Vignette</div>
-              <div class="fx-desc">Darkens the edges, creating a focused and polished print look</div>
-            </div>
-          </label>
-          <label class="fx-chip">
-            <input type="checkbox" id="fx-grain">
-            <div>
-              <div class="fx-title">Grain</div>
-              <div class="fx-desc">Adds a subtle paper texture — gives a handcrafted, printed feel</div>
-            </div>
-          </label>
-        </div>
-      </details>
-
     </div>
   </div>
 
-  <!-- ── EXPORT (collapsed) ── -->
-  <details class="adv">
-    <summary>Export</summary>
-    <div class="adv-body">
+  <!-- ── EXPORT ── (always visible) -->
+  <div>
+    <div class="section-label">Export</div>
+    <div style="display:flex;flex-direction:column;gap:10px;margin-top:8px">
       <div class="field">
         <label>Paper format</label>
-        <div class="hint" style="margin-bottom:6px">Select a standard size or enter custom dimensions.</div>
-        <div class="fmt-row">
+        <div class="fmt-row" style="margin-top:4px">
           <span class="fmt-chip" data-fmt="A4" onclick="setFormatPreset('A4',8.27,11.69)">
             A4<span class="fmt-sub">21×30 cm</span>
           </span>
@@ -678,29 +700,12 @@ details.sub .sub-body{display:flex;flex-direction:column;gap:12px;padding-bottom
         </div>
       </div>
     </div>
-  </details>
+  </div>
 
-  <!-- ── ADVANCED (collapsed) ── -->
-  <details class="adv" id="adv-advanced">
-    <summary>Advanced</summary>
+  <!-- ── CUSTOMIZATION (collapsed) ── -->
+  <details class="adv">
+    <summary>Customization</summary>
     <div class="adv-body">
-      <div class="field">
-        <label>Map centre point</label>
-        <div id="coord-map"></div>
-        <div class="row" style="margin-top:6px">
-          <div class="field"><label for="latitude">Latitude</label>
-            <input id="latitude" type="text" placeholder="auto-detect"></div>
-          <div class="field"><label for="longitude">Longitude</label>
-            <input id="longitude" type="text" placeholder="auto-detect"></div>
-        </div>
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-top:4px">
-          <div class="hint">Click the map to pin the centre, or leave blank to geocode from the city name.</div>
-          <button type="button" onclick="clearCoords()"
-                  style="font-size:.7rem;color:var(--muted);background:none;border:none;cursor:pointer;text-decoration:underline;padding:0;flex-shrink:0;margin-left:8px">
-            Clear
-          </button>
-        </div>
-      </div>
       <div class="field">
         <label for="display_city">Custom city label <span style="font-weight:400;color:var(--muted)">(for non-Latin scripts)</span></label>
         <input id="display_city" type="text" placeholder="e.g. 東京 for Tokyo">
@@ -708,7 +713,8 @@ details.sub .sub-body{display:flex;flex-direction:column;gap:12px;padding-bottom
       </div>
       <div class="field">
         <label for="display_country">Custom country label</label>
-        <input id="display_country" type="text" placeholder="e.g. 日本 for Japan"></div>
+        <input id="display_country" type="text" placeholder="e.g. 日本 for Japan">
+      </div>
       <div class="field">
         <label for="font_family">Google Font</label>
         <input id="font_family" type="text" placeholder="e.g. Noto Sans JP">
@@ -958,10 +964,16 @@ async function pollTask(taskId, city, country, fmt) {
   }
 }
 
+/* Separator visibility tied to "Show country" checkbox */
+function toggleSeparator() {
+  const show = document.getElementById('show-country').checked;
+  document.getElementById('separator-field').style.display = show ? '' : 'none';
+}
+
 /* Leaflet map picker */
 let _map = null, _marker = null;
 
-document.getElementById('adv-advanced').addEventListener('toggle', function() {
+document.getElementById('coords-details').addEventListener('toggle', function() {
   if (this.open && !_map) {
     _map = L.map('coord-map').setView([20, 0], 2);
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
