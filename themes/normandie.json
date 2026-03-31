@@ -1,0 +1,17 @@
+{
+  "name": "Normandie",
+  "description": "Norman heraldry — dark crimson background with gold roads echoing the léopards d'or",
+  "bg": "#180608",
+  "text": "#F0C840",
+  "gradient_color": "#180608",
+  "water": "#08141E",
+  "parks": "#0E1208",
+  "road_motorway": "#F5C828",
+  "road_primary": "#D4A418",
+  "road_secondary": "#A07C10",
+  "road_tertiary": "#6A5008",
+  "road_residential": "#382804",
+  "road_default": "#6A5008",
+  "buildings": "#241008",
+  "railways": "#E8B820"
+}

@@ -1,0 +1,17 @@
+{
+  "name": "Malherbe",
+  "description": "Stade Malherbe de Caen — deep navy background, red motorways, royal blue secondary roads",
+  "bg": "#06122A",
+  "text": "#F0F0F8",
+  "gradient_color": "#06122A",
+  "water": "#040C1C",
+  "parks": "#081A14",
+  "road_motorway": "#E8001C",
+  "road_primary": "#C00018",
+  "road_secondary": "#3870D4",
+  "road_tertiary": "#1A4898",
+  "road_residential": "#0E2A60",
+  "road_default": "#1A4898",
+  "buildings": "#0C1830",
+  "railways": "#E8001C"
+}

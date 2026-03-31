@@ -1,0 +1,17 @@
+{
+  "name": "Malachite",
+  "description": "Near-black background with vivid yellow-green roads — mineral depth, sharp contrast",
+  "bg": "#0C0E0B",
+  "text": "#A8E078",
+  "gradient_color": "#0C0E0B",
+  "water": "#091828",
+  "parks": "#0E180C",
+  "road_motorway": "#B8EC70",
+  "road_primary": "#54C038",
+  "road_secondary": "#2C8018",
+  "road_tertiary": "#18500C",
+  "road_residential": "#0C2808",
+  "road_default": "#18500C",
+  "buildings": "#131A10",
+  "railways": "#7CD858"
+}
