@@ -1,0 +1,17 @@
+{
+  "name": "Velvet",
+  "description": "Deep charcoal with warm ivory roads — high contrast, luxurious print quality",
+  "bg": "#13100E",
+  "text": "#EDE0C0",
+  "gradient_color": "#13100E",
+  "water": "#0C1E38",
+  "parks": "#101810",
+  "road_motorway": "#F0E2C0",
+  "road_primary": "#C8A060",
+  "road_secondary": "#9A6E3A",
+  "road_tertiary": "#6A4520",
+  "road_residential": "#3C2214",
+  "road_default": "#6A4520",
+  "buildings": "#221A12",
+  "railways": "#C8A060"
+}
