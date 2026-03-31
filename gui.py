@@ -212,6 +212,19 @@ def get_task(task_id: str):
     return jsonify(task)
 
 
+@app.route("/api/geocode")
+def api_geocode():
+    city = request.args.get("city", "").strip()
+    country = request.args.get("country", "").strip()
+    if not city or not country:
+        return jsonify({"error": "city and country required"}), 400
+    try:
+        lat, lon = cmp.get_coordinates(city, country)
+        return jsonify({"lat": lat, "lon": lon})
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 404
+
+
 @app.route("/posters/<path:filename>")
 def serve_poster(filename):
     return send_from_directory(POSTERS_DIR, filename)
@@ -972,10 +985,13 @@ function toggleSeparator() {
 
 /* Leaflet map picker */
 let _map = null, _marker = null;
+let _geocodedCenter = null; // last city/country geocode result
 
 document.getElementById('coords-details').addEventListener('toggle', function() {
   if (this.open && !_map) {
-    _map = L.map('coord-map').setView([20, 0], 2);
+    const initView = _geocodedCenter || [20, 0];
+    const initZoom = _geocodedCenter ? 11 : 2;
+    _map = L.map('coord-map').setView(initView, initZoom);
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
       attribution: '© <a href="https://openstreetmap.org">OpenStreetMap</a>',
       maxZoom: 19
@@ -986,8 +1002,33 @@ document.getElementById('coords-details').addEventListener('toggle', function() 
     const lat = document.getElementById('latitude').value;
     const lng = document.getElementById('longitude').value;
     if (lat && lng) setCoords(parseFloat(lat), parseFloat(lng), false);
+  } else if (this.open && _map && _geocodedCenter && !_marker) {
+    // Map already exists but city changed — re-centre without placing a marker
+    _map.setView(_geocodedCenter, 11);
   }
 });
+
+/* Auto-geocode city/country and centre the map */
+let _geocodeTimer = null;
+function scheduleGeocode() {
+  clearTimeout(_geocodeTimer);
+  _geocodeTimer = setTimeout(async () => {
+    const city    = document.getElementById('city').value.trim();
+    const country = document.getElementById('country').value.trim();
+    if (city.length < 2 || country.length < 2) return;
+    try {
+      const res = await fetch('/api/geocode?' + new URLSearchParams({city, country}));
+      if (!res.ok) return;
+      const {lat, lon} = await res.json();
+      if (lat == null || lon == null) return;
+      _geocodedCenter = [lat, lon];
+      // If the map is already open and no custom pin has been placed, re-centre it
+      if (_map && !_marker) _map.setView(_geocodedCenter, 11);
+    } catch { /* silently ignore network errors */ }
+  }, 600);
+}
+document.getElementById('city').addEventListener('input', scheduleGeocode);
+document.getElementById('country').addEventListener('input', scheduleGeocode);
 
 function setCoords(lat, lng, updateInputs=true) {
   if (updateInputs) {
