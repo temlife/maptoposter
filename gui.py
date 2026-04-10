@@ -143,7 +143,8 @@ def _run_task(task_id: str, data: dict) -> None:
         else:
             prefetched = None
 
-        results: list = []
+        # Results are pushed incrementally so the frontend can display them as they arrive
+        task["results"] = []
 
         if n > 1:
             workers = min(4, n)
@@ -157,26 +158,26 @@ def _run_task(task_id: str, data: dict) -> None:
                 for future in as_completed(futures):
                     tk = futures[future]
                     done += 1
-                    upd(progress=0.35 + 0.6 * done / n, message=f"Rendered {done}/{n} themes…")
                     try:
                         out = future.result()
-                        results.append({"theme": tk, "file": os.path.basename(out)})
+                        task["results"].append({"theme": tk, "file": os.path.basename(out)})
                     except Exception as exc:
-                        results.append({"theme": tk, "error": str(exc)})
+                        task["results"].append({"theme": tk, "error": str(exc)})
+                    upd(progress=0.35 + 0.6 * done / n, message=f"Rendered {done}/{n} themes…")
         else:
             upd(message="Rendering poster…", progress=0.35)
             try:
                 out = do_generate({**data, "theme": themes_to_run[0]}, coords)
-                results.append({"theme": themes_to_run[0], "file": os.path.basename(out)})
+                task["results"].append({"theme": themes_to_run[0], "file": os.path.basename(out)})
                 upd(progress=0.95)
             except Exception as exc:
-                results.append({"theme": themes_to_run[0], "error": str(exc)})
+                task["results"].append({"theme": themes_to_run[0], "error": str(exc)})
 
-        ok = sum(1 for r in results if "error" not in r)
+        ok = sum(1 for r in task["results"] if "error" not in r)
         summary = f"{ok} poster{'s' if ok != 1 else ''} generated"
         if ok < n:
             summary += f", {n - ok} failed"
-        upd(status="done", progress=1.0, message=summary, results=results)
+        upd(status="done", progress=1.0, message=summary)
 
     except Exception as exc:
         task.update({"status": "error", "message": str(exc), "progress": 1.0})
@@ -209,7 +210,11 @@ def get_task(task_id: str):
     task = tasks.get(task_id)
     if task is None:
         return jsonify({"error": "Task not found"}), 404
-    return jsonify(task)
+    # Snapshot to avoid race conditions with the background thread
+    snapshot = {**task}
+    if snapshot.get("results") is not None:
+        snapshot["results"] = list(snapshot["results"])
+    return jsonify(snapshot)
 
 
 @app.route("/api/geocode")
@@ -566,6 +571,7 @@ details.sub .sub-body{display:flex;flex-direction:column;gap:12px;padding-bottom
     </div>
     <div style="margin-top:auto;display:flex;flex-direction:column;gap:8px;padding-top:8px">
       <button class="btn btn-p" id="btn-gen" onclick="generate(false)">Generate Poster</button>
+      <button class="btn btn-s" onclick="generate(true)">Generate All Themes</button>
       <div class="hint" style="text-align:center">Ctrl+Enter to generate</div>
     </div>
   </div>
@@ -691,8 +697,9 @@ details.sub .sub-body{display:flex;flex-direction:column;gap:12px;padding-bottom
       <input id="font_family" type="text" placeholder="e.g. Noto Sans JP">
       <div class="hint">Leave blank for default Roboto.</div>
     </div>
-    <div style="margin-top:auto;padding-top:8px">
+    <div style="margin-top:auto;display:flex;flex-direction:column;gap:8px;padding-top:8px">
       <button class="btn btn-p" onclick="generate(false)">Generate Poster</button>
+      <button class="btn btn-s" onclick="generate(true)">Generate All Themes</button>
     </div>
   </div>
 
@@ -737,8 +744,9 @@ details.sub .sub-body{display:flex;flex-direction:column;gap:12px;padding-bottom
       </select>
       <div id="dpi-hint" class="hint"></div>
     </div>
-    <div style="margin-top:auto;padding-top:8px">
+    <div style="margin-top:auto;display:flex;flex-direction:column;gap:8px;padding-top:8px">
       <button class="btn btn-p" onclick="generate(false)">Generate Poster</button>
+      <button class="btn btn-s" onclick="generate(true)">Generate All Themes</button>
     </div>
   </div>
 
@@ -950,49 +958,69 @@ async function generate(allThemes) {
   }
 }
 
+function buildResultCard(r, fmt) {
+  const ts = Date.now();
+  let html = '<div class="res-card">';
+  if (r.error) {
+    html += '<div class="res-foot" style="color:var(--err)">\u2717 ' + (T[r.theme]?.name||r.theme) + ': ' + r.error + '</div>';
+  } else {
+    if (fmt === 'png') {
+      html += '<img src="/posters/'+r.file+'?t='+ts+'" onclick="openLightbox(\'/posters/'+r.file+'\')">';
+    } else {
+      html += '<div style="padding:36px;text-align:center;color:var(--muted)">'+
+              fmt.toUpperCase()+' generated \u2014 download below.</div>';
+    }
+    html += '<div class="res-foot"><span class="res-title">'+(T[r.theme]?.name||r.theme)+'</span>' +
+            '<a href="/posters/'+r.file+'" download class="btn btn-sm btn-p">\u2193 '+
+            fmt.toUpperCase()+'</a></div>';
+  }
+  html += '</div>';
+  return html;
+}
+
 async function pollTask(taskId, city, country, fmt) {
   const fill = document.getElementById('prog-fill');
   const progText = document.getElementById('prog-text');
+  const resultDiv = document.getElementById('result');
+  let rendered = 0;  // how many results we've already shown
+  let grid = null;   // the grid container element
+  let pollMs = 1500; // start slow, speed up once rendering starts
 
   while (true) {
-    await new Promise(r => setTimeout(r, 1500));
+    await new Promise(r => setTimeout(r, pollMs));
     let task;
     try { task = await fetch('/api/task/' + taskId).then(r => r.json()); }
     catch { continue; }
+    // Speed up polling once results start arriving
+    if ((task.results || []).length > 0 && task.status !== 'done') pollMs = 500;
 
     fill.style.width = Math.round((task.progress || 0) * 100) + '%';
-    progText.textContent = task.message || '…';
+    progText.textContent = task.message || '\u2026';
+
+    // Render new results incrementally
+    const results = task.results || [];
+    if (results.length > rendered) {
+      if (!grid) {
+        grid = document.createElement('div');
+        grid.className = 'res-grid';
+        resultDiv.innerHTML = '';
+        resultDiv.appendChild(grid);
+      }
+      for (let i = rendered; i < results.length; i++) {
+        grid.insertAdjacentHTML('beforeend', buildResultCard(results[i], fmt));
+      }
+      rendered = results.length;
+      // Scroll to show the latest result
+      resultDiv.scrollIntoView({behavior:'smooth', block:'end'});
+    }
 
     if (task.status === 'done') {
-      const results = task.results || [];
+      // Final: update grid class for single result, show toasts
+      if (grid && rendered === 1) grid.classList.add('single');
       const ok = results.filter(r => !r.error).length;
       const fail = results.filter(r => r.error).length;
       if (ok) toast(ok + ' poster' + (ok !== 1 ? 's' : '') + ' generated!', 'ok');
       if (fail) toast(fail + ' generation' + (fail !== 1 ? 's' : '') + ' failed.', 'err');
-
-      const ts = Date.now();
-      const isSingle = results.length === 1;
-      let html = '<div class="res-grid' + (isSingle ? ' single' : '') + '">';
-      results.forEach((r, i) => {
-        if (r.error) {
-          html += '<div class="res-card" style="animation-delay:'+i*0.08+'s">' +
-                  '<div class="res-foot" style="color:var(--err)">✗ ' + r.theme + ': ' + r.error + '</div></div>';
-        } else {
-          html += '<div class="res-card" style="animation-delay:'+i*0.08+'s">';
-          if (fmt === 'png') {
-            html += '<img src="/posters/'+r.file+'?t='+ts+'" onclick="openLightbox(\'/posters/'+r.file+'\')">';
-          } else {
-            html += '<div style="padding:36px;text-align:center;color:var(--muted)">'+
-                    fmt.toUpperCase()+' generated — download below.</div>';
-          }
-          html += '<div class="res-foot"><span class="res-title">'+(T[r.theme]?.name||r.theme)+'</span>' +
-                  '<a href="/posters/'+r.file+'" download class="btn btn-sm btn-p">↓ '+
-                  fmt.toUpperCase()+'</a></div></div>';
-        }
-      });
-      html += '</div>';
-      document.getElementById('result').innerHTML = html;
-      setTimeout(() => document.getElementById('result').scrollIntoView({behavior:'smooth'}), 150);
       break;
     } else if (task.status === 'error') {
       toast(task.message, 'err');
