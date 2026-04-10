@@ -60,13 +60,16 @@ _MEM_CACHE_MAX = 64
 # OSM feature layers: name → tags dict for ox.features_from_point
 LAYER_TAGS: dict[str, dict] = {
     "water": {"natural": ["water", "bay", "strait"], "waterway": "riverbank"},
+    "waterways": {"waterway": ["river", "stream", "canal"]},
     "parks": {"leisure": "park", "landuse": "grass"},
+    "forests": {"landuse": "forest", "natural": "wood"},
+    "beaches": {"natural": ["beach", "sand", "wetland"]},
     "landuse": {"landuse": ["residential", "retail", "commercial", "industrial"]},
     "buildings": {"building": True},
     "railways": {"railway": ["rail", "subway", "light_rail", "tram"]},
 }
 # Default layers fetched when none specified (CLI). "landuse" is opt-in via GUI.
-DEFAULT_LAYERS = ["water", "parks", "buildings", "railways"]
+DEFAULT_LAYERS = ["water", "waterways", "parks", "forests", "beaches", "buildings", "railways"]
 
 
 @dataclass
@@ -288,9 +291,12 @@ def load_theme(theme_name="terracotta"):
 THEME = dict[str, str]()  # Will be loaded later
 
 
-def create_gradient_fade(ax, color, location="bottom", zorder=10):
+def create_gradient_fade(ax, color, location="bottom", zorder=10, fade_pct=25):
     """
     Creates a fade effect at the top or bottom of the map.
+
+    Args:
+        fade_pct: Percentage of the axis height covered by the fade (default: 25).
     """
     vals = np.linspace(0, 1, 256).reshape(-1, 1)
     gradient = np.hstack((vals, vals))
@@ -301,13 +307,14 @@ def create_gradient_fade(ax, color, location="bottom", zorder=10):
     my_colors[:, 1] = rgb[1]
     my_colors[:, 2] = rgb[2]
 
+    frac = max(5, min(50, fade_pct)) / 100.0
     if location == "bottom":
         my_colors[:, 3] = np.linspace(1, 0, 256)
         extent_y_start = 0
-        extent_y_end = 0.25
+        extent_y_end = frac
     else:
         my_colors[:, 3] = np.linspace(0, 1, 256)
-        extent_y_start = 0.75
+        extent_y_start = 1.0 - frac
         extent_y_end = 1.0
 
     custom_cmap = mcolors.ListedColormap(my_colors)
@@ -733,6 +740,14 @@ def create_poster(
             lu_color = theme.get("landuse", _darken_color(theme["bg"], 0.04))
             _project_gdf(lu_polys, simplify=5).plot(ax=ax, facecolor=lu_color, edgecolor="none", alpha=0.6, zorder=0.2)
 
+    # Beaches (sand/wetland polygons, below water)
+    beaches = features_dict.get("beaches")
+    if beaches is not None and not beaches.empty:
+        beach_polys = beaches[beaches.geometry.type.isin(["Polygon", "MultiPolygon"])]
+        if not beach_polys.empty:
+            beach_color = theme.get("beaches", _darken_color(theme["bg"], 0.06))
+            _project_gdf(beach_polys).plot(ax=ax, facecolor=beach_color, edgecolor="none", alpha=0.7, zorder=0.3)
+
     water = features_dict.get("water")
     if water is not None and not water.empty:
         water_polys = water[water.geometry.type.isin(["Polygon", "MultiPolygon"])]
@@ -741,6 +756,14 @@ def create_poster(
             _project_gdf(water_polys).plot(
                 ax=ax, facecolor=theme["water"], edgecolor=water_edge, linewidth=0.6, zorder=0.5
             )
+
+    # Forests (larger wooded areas, between water and parks)
+    forests = features_dict.get("forests")
+    if forests is not None and not forests.empty:
+        forest_polys = forests[forests.geometry.type.isin(["Polygon", "MultiPolygon"])]
+        if not forest_polys.empty:
+            forest_color = theme.get("forests", _darken_color(theme["parks"], 0.05))
+            _project_gdf(forest_polys, simplify=3).plot(ax=ax, facecolor=forest_color, edgecolor="none", alpha=0.8, zorder=0.6)
 
     parks = features_dict.get("parks")
     if parks is not None and not parks.empty:
@@ -784,7 +807,15 @@ def create_poster(
     ax.set_xlim(crop_xlim)
     ax.set_ylim(crop_ylim)
 
-    # Layer 2b: Railways
+    # Layer 2b: Waterways (linear rivers, streams, canals)
+    waterways = features_dict.get("waterways")
+    if waterways is not None and not waterways.empty:
+        ww_lines = waterways[waterways.geometry.type.isin(["LineString", "MultiLineString"])]
+        if not ww_lines.empty:
+            ww_color = theme.get("waterways", theme["water"])
+            _project_gdf(ww_lines).plot(ax=ax, color=ww_color, linewidth=0.5, alpha=0.8, zorder=1.5)
+
+    # Layer 2c: Railways
     railways = features_dict.get("railways")
     if railways is not None and not railways.empty:
         rail_lines = railways[railways.geometry.type.isin(["LineString", "MultiLineString"])]
@@ -793,12 +824,13 @@ def create_poster(
             _project_gdf(rail_lines).plot(ax=ax, color=rail_color, linewidth=0.8, alpha=0.7, zorder=2.5)
 
     # Layer 3: Gradients — text side gets the strong fade, opposite gets a thin frame fade
+    fade_pct = theme.get("gradient_pct", 25)
     if layout == "top":
-        create_gradient_fade(ax, theme["gradient_color"], location="top", zorder=10)
-        create_gradient_fade(ax, theme["gradient_color"], location="bottom", zorder=10)
+        create_gradient_fade(ax, theme["gradient_color"], location="top", zorder=10, fade_pct=fade_pct)
+        create_gradient_fade(ax, theme["gradient_color"], location="bottom", zorder=10, fade_pct=fade_pct)
     else:  # bottom (default)
-        create_gradient_fade(ax, theme["gradient_color"], location="bottom", zorder=10)
-        create_gradient_fade(ax, theme["gradient_color"], location="top", zorder=10)
+        create_gradient_fade(ax, theme["gradient_color"], location="bottom", zorder=10, fade_pct=fade_pct)
+        create_gradient_fade(ax, theme["gradient_color"], location="top", zorder=10, fade_pct=fade_pct)
 
     # Layer 4: Vignette + grain (applied after crop limits are set)
     if vignette:
@@ -935,10 +967,26 @@ def create_poster(
                 color=theme["text"], linewidth=1 * scale_factor, zorder=11)
 
 
-    # 5. Save
-    print(f"Saving to {output_file}...")
-
+    # 5. Save — check memory budget before rasterizing at high DPI
     fmt = output_format.lower()
+
+    if fmt == "png" and dpi > 300:
+        total_pixels = (width * dpi) * (height * dpi)
+        # Matplotlib needs ~6x the pixel buffer during savefig compositing
+        estimated_gb = (total_pixels * 4 * 6) / (1024 ** 3)
+        try:
+            mem_info = os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_AVPHYS_PAGES")
+            avail_gb = mem_info / (1024 ** 3)
+        except Exception:
+            avail_gb = 8.0  # conservative fallback
+        if estimated_gb > avail_gb * 0.7:
+            safe_dpi = int(((avail_gb * 0.7 / 6 * (1024 ** 3)) / (width * height * 4)) ** 0.5)
+            safe_dpi = max(300, (safe_dpi // 50) * 50)  # round down to nearest 50
+            print(f"⚠ {dpi} DPI needs ~{estimated_gb:.1f} GB RAM but only {avail_gb:.1f} GB available.")
+            print(f"  Capping to {safe_dpi} DPI to avoid crash.")
+            dpi = safe_dpi
+
+    print(f"Saving to {output_file}...")
     save_kwargs = dict(
         facecolor=theme["bg"],
         bbox_inches="tight",
@@ -1143,6 +1191,46 @@ Examples:
         help="Resolution in DPI (default: 300). Higher values produce larger files.",
     )
     parser.add_argument(
+        "--tagline",
+        type=str,
+        help="Custom text below the country name",
+    )
+    parser.add_argument(
+        "--layout",
+        default="bottom",
+        choices=["bottom", "top"],
+        help="Text position on the poster (default: bottom)",
+    )
+    parser.add_argument(
+        "--separator",
+        default="line",
+        choices=["line", "double", "dots"],
+        help="Separator style between city and country (default: line)",
+    )
+    parser.add_argument(
+        "--no-vignette",
+        dest="vignette",
+        action="store_false",
+        help="Disable the vignette edge-darkening effect",
+    )
+    parser.add_argument(
+        "--grain",
+        action="store_true",
+        help="Enable the paper grain texture overlay",
+    )
+    parser.add_argument(
+        "--no-country",
+        dest="show_country",
+        action="store_false",
+        help="Hide the country name on the poster",
+    )
+    parser.add_argument(
+        "--no-coords",
+        dest="show_coords",
+        action="store_false",
+        help="Hide the coordinates on the poster",
+    )
+    parser.add_argument(
         "--layers",
         nargs="+",
         default=None,
@@ -1241,6 +1329,13 @@ Examples:
                     prefetched=prefetched,
                     layers=cli_layers,
                     dpi=args.dpi,
+                    layout=args.layout,
+                    tagline=args.tagline,
+                    separator=args.separator,
+                    vignette=args.vignette,
+                    grain=args.grain,
+                    show_country=args.show_country,
+                    show_coords=args.show_coords,
                 )
                 return out
 
@@ -1267,6 +1362,13 @@ Examples:
                 theme=THEME,
                 layers=cli_layers,
                 dpi=args.dpi,
+                layout=args.layout,
+                tagline=args.tagline,
+                separator=args.separator,
+                vignette=args.vignette,
+                grain=args.grain,
+                show_country=args.show_country,
+                show_coords=args.show_coords,
             )
 
         print("\n" + "=" * 50)

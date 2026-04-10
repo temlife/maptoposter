@@ -80,6 +80,13 @@ python create_map_poster.py --city <city> --country <country> [options]
 | **OPTIONAL:** `--width` | `-W` | Image width in inches | 12 (max: 20) |
 | **OPTIONAL:** `--height` | `-H` | Image height in inches | 16 (max: 20) |
 | **OPTIONAL:** `--dpi` | | Resolution in DPI | 300 |
+| **OPTIONAL:** `--tagline` | | Custom text below the country name | |
+| **OPTIONAL:** `--layout` | | Text position: `bottom` or `top` | bottom |
+| **OPTIONAL:** `--separator` | | Separator style: `line`, `double`, or `dots` | line |
+| **OPTIONAL:** `--no-vignette` | | Disable the vignette edge-darkening effect | |
+| **OPTIONAL:** `--grain` | | Enable the paper grain texture overlay | |
+| **OPTIONAL:** `--no-country` | | Hide the country name | |
+| **OPTIONAL:** `--no-coords` | | Hide the coordinates | |
 
 ### Multilingual Support - i18n
 
@@ -115,7 +122,6 @@ The `--dpi` flag controls output resolution. Higher DPI produces larger, more de
 | Apercu rapide | 150 | 1800 x 2400 px | Quick preview |
 | Standard | 300 | 3600 x 4800 px | A3/A4 printing |
 | Grand format | 600 | 7200 x 9600 px | Large posters (60x80cm+) |
-| Ultra HD | 900 | 10800 x 14400 px | 8K+ / very large prints |
 
 ```bash
 # Standard print quality (default)
@@ -124,8 +130,8 @@ python create_map_poster.py -c "Paris" -C "France"
 # Large format poster
 python create_map_poster.py -c "Paris" -C "France" --dpi 600
 
-# Ultra high resolution for 8K display
-python create_map_poster.py -c "Paris" -C "France" --dpi 900
+# Large format poster for printing
+python create_map_poster.py -c "Paris" -C "France" --dpi 600
 ```
 
 ### Dimension Guide
@@ -228,7 +234,7 @@ python create_map_poster.py -c "Tokyo" -C "Japan" --all-themes
 
 ## Themes
 
-17 themes available in `themes/` directory:
+21 themes available in `themes/` directory:
 
 | Theme | Style |
 |-------|-------|
@@ -249,6 +255,10 @@ python create_map_poster.py -c "Tokyo" -C "Japan" --all-themes
 | `autumn` | Seasonal burnt oranges and reds |
 | `copper_patina` | Oxidized copper aesthetic |
 | `monochrome_blue` | Single blue color family |
+| `velvet` | Dark warm velvet with gold accents |
+| `malachite` | Deep black-green with lime roads |
+| `malherbe` | Dark navy with red accents |
+| `normandie` | Dark burgundy with gold accents |
 
 ## Output
 
@@ -270,7 +280,13 @@ Create a JSON file in `themes/` directory:
   "text": "#000000",
   "gradient_color": "#FFFFFF",
   "water": "#C0C0C0",
+  "water_edge": "#A0A0A0",
+  "waterways": "#C0C0C0",
   "parks": "#F0F0F0",
+  "forests": "#E0E0E0",
+  "beaches": "#F0ECE8",
+  "buildings": "#E8E8E8",
+  "railways": "#888888",
   "road_motorway": "#0A0A0A",
   "road_primary": "#1A1A1A",
   "road_secondary": "#2A2A2A",
@@ -279,6 +295,9 @@ Create a JSON file in `themes/` directory:
   "road_default": "#3A3A3A"
 }
 ```
+
+Optional theme properties with defaults:
+- `gradient_pct`: Gradient fade height as percentage of poster (default: 25, range: 5-50)
 
 ## Project Structure
 
@@ -340,9 +359,17 @@ Quick reference for contributors who want to extend or modify the script.
 ```text
 z=11  Text labels (city, country, coords)
 z=10  Gradient fades (top & bottom)
-z=3   Roads (via ox.plot_graph)
-z=2   Parks (green polygons)
-z=1   Water (blue polygons)
+z=9   Vignette (radial edge darkening)
+z=8   Grain (paper texture)
+z=2.5 Railways (line features)
+z=2+  Roads (via ox.plot_graph)
+z=1.5 Waterways (rivers, streams, canals)
+z=0.9 Buildings (polygons, alpha 0.5)
+z=0.8 Parks (green polygons)
+z=0.6 Forests (wooded areas)
+z=0.5 Water (lakes, sea polygons)
+z=0.3 Beaches (sand, wetland)
+z=0.2 Land use (residential, commercial)
 z=0   Background color
 ```
 
@@ -421,4 +448,4 @@ G = ox.graph_from_point(point, dist=dist, network_type='walk')   # pedestrian
 - Large `dist` values (>20km) = slow downloads + memory heavy
 - Cache coordinates locally to avoid Nominatim rate limits
 - Use `network_type='drive'` instead of `'all'` for faster renders
-- Use `--dpi 150` for quick previews, `--dpi 600` or `900` only when needed (large files, slow rendering)
+- Use `--dpi 150` for quick previews, `--dpi 600` only when needed (large files, slow rendering, high memory usage)

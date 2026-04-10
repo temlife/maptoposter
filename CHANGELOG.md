@@ -9,8 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - **Resolution presets** - `--dpi` CLI flag (default 300) for controlling output resolution
-  - GUI: 4 named presets (Apercu rapide 150, Standard 300, Grand format 600, Ultra HD 900) with dynamic pixel count display
-  - Enables large format printing (60x80cm+) and 8K+ digital output
+  - GUI: 3 named presets (Apercu rapide 150, Standard 300, Grand format 600) with dynamic pixel count display
+  - Enables large format printing (60x80cm+)
+  - Memory safety check: auto-caps DPI if available RAM is insufficient
+- **New OSM layers** — waterways (rivers, streams, canals), forests (wooded areas), beaches (sand, wetlands)
+  - GUI: 3 new layer checkboxes, enabled by default
+  - CLI: available via `--layers` flag
+- **CLI parity with GUI** — new flags: `--tagline`, `--layout`, `--separator`, `--no-vignette`, `--grain`, `--no-country`, `--no-coords`
+- **Themable gradient fade** — `gradient_pct` theme property controls fade extent (default 25%)
+- **Enriched theme files** — all 21 themes now define explicit colors for `waterways`, `forests`, `beaches`, `water_edge`, `buildings`, `railways`
 - **uv package manager support** ([PR #20](https://github.com/originalankur/maptoposter/pull/20))
   - Added `pyproject.toml` with project metadata and dependencies
   - Added `uv.lock` for reproducible builds

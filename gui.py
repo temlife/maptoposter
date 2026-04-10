@@ -260,16 +260,36 @@ html{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
      font-size:15px;color:var(--text);background:var(--bg)}
 body{display:flex;min-height:100vh}
 
-/* Sidebar */
-.sidebar{
-  width:400px;min-width:400px;background:var(--surface);
-  border-right:1px solid var(--border);padding:22px 20px;
-  overflow-y:auto;display:flex;flex-direction:column;gap:20px;
+/* Tab rail */
+.tab-rail{
+  width:52px;min-width:52px;background:color-mix(in srgb,var(--surface) 85%,#000);
+  border-right:1px solid var(--border);
+  display:flex;flex-direction:column;align-items:center;
+  padding:10px 0;gap:2px;
 }
+.tab-btn{
+  width:42px;height:42px;border-radius:var(--r);display:flex;flex-direction:column;
+  align-items:center;justify-content:center;gap:1px;
+  cursor:pointer;color:var(--muted);font-size:16px;transition:all .15s;
+  border:none;background:none;
+}
+.tab-btn:hover{color:var(--accent)}
+.tab-btn.active{background:var(--surface);color:var(--accent)}
+.tab-btn .tab-label{font-size:.55rem;font-weight:600;letter-spacing:.02em}
+
+/* Tab panel */
+.tab-panel{
+  width:320px;min-width:320px;background:var(--surface);
+  border-right:1px solid var(--border);padding:18px 16px;
+  overflow-y:auto;display:flex;flex-direction:column;gap:16px;
+}
+.panel{display:none;flex-direction:column;gap:14px}
+.panel.active{display:flex}
+.panel-title{font-size:1.1rem;font-weight:700;color:var(--accent);margin-bottom:2px}
 .section-label{
   font-size:.62rem;font-weight:700;text-transform:uppercase;
-  letter-spacing:.1em;color:var(--muted);padding-bottom:8px;
-  border-bottom:1px solid var(--border);
+  letter-spacing:.1em;color:var(--muted);padding-bottom:6px;
+  border-bottom:1px solid var(--border);margin-top:4px;
 }
 .app-title{font-size:1.35rem;font-weight:700;letter-spacing:.04em;color:var(--accent)}
 .app-sub{font-size:.75rem;color:var(--muted);margin-top:2px}
@@ -469,7 +489,10 @@ details.sub .sub-body{display:flex;flex-direction:column;gap:12px;padding-bottom
 /* Responsive */
 @media(max-width:900px){
   body{flex-direction:column}
-  .sidebar{width:100%;min-width:0;border-right:none;border-bottom:1px solid var(--border)}
+  .tab-rail{width:100%;min-width:0;flex-direction:row;justify-content:center;
+    padding:6px 0;gap:4px;border-right:none;border-bottom:1px solid var(--border)}
+  .tab-panel{width:100%;min-width:0;border-right:none;border-bottom:1px solid var(--border);
+    max-height:50vh}
   .main{padding:18px}
   .theme-grid{grid-template-columns:repeat(3,1fr)}
 }
@@ -477,273 +500,246 @@ details.sub .sub-body{display:flex;flex-direction:column;gap:12px;padding-bottom
 </head>
 <body>
 
-<aside class="sidebar">
-
-  <!-- Header -->
-  <div style="display:flex;justify-content:space-between;align-items:start">
-    <div>
-      <div class="app-title">MapToPoster</div>
-      <div class="app-sub">Generate minimalist city map posters</div>
-    </div>
-    <button class="dark-btn" id="dark-btn" onclick="toggleDark()" title="Toggle dark mode">
+<!-- Tab rail -->
+<nav class="tab-rail">
+  <button class="tab-btn active" onclick="switchTab('lieu')" title="Localisation">
+    <span>&#128205;</span><span class="tab-label">Lieu</span>
+  </button>
+  <button class="tab-btn" onclick="switchTab('style')" title="Style">
+    <span>&#127912;</span><span class="tab-label">Style</span>
+  </button>
+  <button class="tab-btn" onclick="switchTab('texte')" title="Texte">
+    <span>&#9998;</span><span class="tab-label">Texte</span>
+  </button>
+  <button class="tab-btn" onclick="switchTab('export')" title="Export">
+    <span>&#128190;</span><span class="tab-label">Export</span>
+  </button>
+  <div style="margin-top:auto">
+    <button class="tab-btn" onclick="toggleDark()" title="Toggle dark mode">
       <span id="dark-icon">&#9789;</span>
     </button>
   </div>
+</nav>
 
-  <!-- ── LOCATION ── -->
-  <div>
-    <div class="section-label">Location</div>
-    <div style="display:flex;flex-direction:column;gap:10px;margin-top:8px">
-      <div class="row">
-        <div class="field">
-          <label for="city">City *</label>
-          <input id="city" type="text" placeholder="e.g. Paris">
+<!-- Tab panel -->
+<aside class="tab-panel">
+
+  <!-- ══ LIEU ══ -->
+  <div class="panel active" data-tab="lieu">
+    <div class="panel-title">Localisation</div>
+    <div class="row">
+      <div class="field">
+        <label for="city">City *</label>
+        <input id="city" type="text" placeholder="e.g. Paris">
+      </div>
+      <div class="field">
+        <label for="country">Country *</label>
+        <input id="country" type="text" placeholder="e.g. France">
+      </div>
+    </div>
+    <details class="sub" id="coords-details">
+      <summary>Map centre point</summary>
+      <div class="sub-body">
+        <div id="coord-map"></div>
+        <div class="row" style="margin-top:6px">
+          <div class="field"><label for="latitude">Latitude</label>
+            <input id="latitude" type="text" placeholder="auto-detect"></div>
+          <div class="field"><label for="longitude">Longitude</label>
+            <input id="longitude" type="text" placeholder="auto-detect"></div>
         </div>
-        <div class="field">
-          <label for="country">Country *</label>
-          <input id="country" type="text" placeholder="e.g. France">
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <div class="hint">Click the map or leave blank to auto-detect.</div>
+          <button type="button" onclick="clearCoords()"
+                  style="font-size:.7rem;color:var(--muted);background:none;border:none;cursor:pointer;text-decoration:underline;padding:0;flex-shrink:0;margin-left:8px">
+            Clear
+          </button>
         </div>
       </div>
-      <!-- Map centre toggle (replaces former "Advanced" map picker) -->
-      <details class="sub" id="coords-details">
-        <summary>Map centre point</summary>
-        <div class="sub-body">
-          <div id="coord-map"></div>
-          <div class="row" style="margin-top:6px">
-            <div class="field"><label for="latitude">Latitude</label>
-              <input id="latitude" type="text" placeholder="auto-detect"></div>
-            <div class="field"><label for="longitude">Longitude</label>
-              <input id="longitude" type="text" placeholder="auto-detect"></div>
-          </div>
-          <div style="display:flex;justify-content:space-between;align-items:center">
-            <div class="hint">Click the map to pin the centre, or leave blank to geocode from the city name.</div>
-            <button type="button" onclick="clearCoords()"
-                    style="font-size:.7rem;color:var(--muted);background:none;border:none;cursor:pointer;text-decoration:underline;padding:0;flex-shrink:0;margin-left:8px">
-              Clear
-            </button>
-          </div>
-        </div>
-      </details>
+    </details>
+    <div class="field">
+      <label for="distance">Radius</label>
+      <div class="slider-row">
+        <input id="distance" type="range" min="2000" max="30000" step="1000" value="18000">
+        <span class="slider-val" id="dist-val">18 km</span>
+      </div>
+      <div class="hint">4-6 km: neighbourhood · 8-12 km: centre · 15-20 km: metro</div>
+    </div>
+    <div style="margin-top:auto;display:flex;flex-direction:column;gap:8px;padding-top:8px">
+      <button class="btn btn-p" id="btn-gen" onclick="generate(false)">Generate Poster</button>
+      <div class="hint" style="text-align:center">Ctrl+Enter to generate</div>
     </div>
   </div>
 
-  <!-- ── MAP ── -->
-  <div>
-    <div class="section-label">Map</div>
-    <div style="display:flex;flex-direction:column;gap:12px;margin-top:8px">
-      <div class="field">
-        <label for="distance">Radius — how much of the city to show</label>
-        <div class="slider-row">
-          <input id="distance" type="range" min="2000" max="30000" step="1000" value="18000">
-          <span class="slider-val" id="dist-val">18 km</span>
+  <!-- ══ STYLE ══ -->
+  <div class="panel" data-tab="style">
+    <div class="panel-title">Style</div>
+    <div class="field">
+      <label>Theme</label>
+      <div class="theme-grid" id="theme-grid" style="margin-top:4px">
+        {% for key, t in themes.items() %}
+        <div class="chip{% if key == 'terracotta' %} active{% endif %}"
+             data-key="{{ key }}" title="{{ t.get('description','') }}">
+          <span class="dot" style="background:{{ t.bg }};border-color:{{ t.get('road_primary','#888') }}"></span>
+          <span>{{ t.get('name', key) }}</span>
         </div>
-        <div class="hint">4–6 km: dense neighbourhood &nbsp;·&nbsp; 8–12 km: city centre &nbsp;·&nbsp; 15–20 km: metro area</div>
+        {% endfor %}
       </div>
-      <div class="field">
-        <label>Content — which map layers to render</label>
-        <div class="layer-row">
-          <label class="layer-chip" data-tip="Rivers, lakes &amp; sea"><input type="checkbox" value="water" checked> Water</label>
-          <label class="layer-chip" data-tip="Parks &amp; green spaces"><input type="checkbox" value="parks" checked> Parks</label>
-          <label class="layer-chip" data-tip="Residential, retail &amp; industrial zones"><input type="checkbox" value="landuse"> Land use</label>
-          <label class="layer-chip" data-tip="Building footprints — slow on large radii"><input type="checkbox" value="buildings"> Buildings</label>
-          <label class="layer-chip" data-tip="Metro, tram &amp; rail lines"><input type="checkbox" value="railways" checked> Railways</label>
-        </div>
+      <div class="theme-hint" id="theme-hint" style="margin-top:5px">{{ themes.get('terracotta',{}).get('description','') }}</div>
+    </div>
+    <div class="field">
+      <label>Layers</label>
+      <div class="layer-row">
+        <label class="layer-chip" data-tip="Lakes, bays &amp; sea"><input type="checkbox" value="water" checked> Water</label>
+        <label class="layer-chip" data-tip="Rivers, streams &amp; canals"><input type="checkbox" value="waterways" checked> Waterways</label>
+        <label class="layer-chip" data-tip="Parks &amp; green spaces"><input type="checkbox" value="parks" checked> Parks</label>
+        <label class="layer-chip" data-tip="Forests &amp; wooded areas"><input type="checkbox" value="forests" checked> Forests</label>
+        <label class="layer-chip" data-tip="Beaches, sand &amp; wetlands"><input type="checkbox" value="beaches" checked> Beaches</label>
+        <label class="layer-chip" data-tip="Residential, retail &amp; industrial"><input type="checkbox" value="landuse"> Land use</label>
+        <label class="layer-chip" data-tip="Building footprints — slow on large radii"><input type="checkbox" value="buildings"> Buildings</label>
+        <label class="layer-chip" data-tip="Metro, tram &amp; rail lines"><input type="checkbox" value="railways" checked> Railways</label>
       </div>
+    </div>
+    <div class="field">
+      <label>Effects</label>
+      <div style="display:flex;flex-direction:column;gap:6px;margin-top:4px">
+        <label class="fx-chip">
+          <input type="checkbox" id="fx-vignette" checked>
+          <div><div class="fx-title">Vignette</div><div class="fx-desc">Darkens edges for a print look</div></div>
+        </label>
+        <label class="fx-chip">
+          <input type="checkbox" id="fx-grain">
+          <div><div class="fx-title">Grain</div><div class="fx-desc">Subtle paper texture</div></div>
+        </label>
+      </div>
+    </div>
+    <div style="margin-top:auto;display:flex;flex-direction:column;gap:8px;padding-top:8px">
+      <button class="btn btn-p" onclick="generate(false)">Generate Poster</button>
+      <button class="btn btn-s" id="btn-all" onclick="generate(true)">Generate All Themes</button>
     </div>
   </div>
 
-  <!-- ── STYLE ── -->
-  <div>
-    <div class="section-label">Style</div>
-    <div style="display:flex;flex-direction:column;gap:0;margin-top:8px">
-
-      <!-- Theme -->
-      <div class="field" style="margin-bottom:14px">
-        <label>Theme — colour palette for the poster</label>
-        <div class="theme-grid" id="theme-grid" style="margin-top:6px">
-          {% for key, t in themes.items() %}
-          <div class="chip{% if key == 'terracotta' %} active{% endif %}"
-               data-key="{{ key }}" title="{{ t.get('description','') }}">
-            <span class="dot" style="background:{{ t.bg }};border-color:{{ t.get('road_primary','#888') }}"></span>
-            <span>{{ t.get('name', key) }}</span>
-          </div>
-          {% endfor %}
-        </div>
-        <div class="theme-hint" id="theme-hint" style="margin-top:5px">{{ themes.get('terracotta',{}).get('description','') }}</div>
+  <!-- ══ TEXTE ══ -->
+  <div class="panel" data-tab="texte">
+    <div class="panel-title">Texte &amp; Typographie</div>
+    <div class="field">
+      <label>Text position</label>
+      <div class="layout-row">
+        <label class="layout-pill">
+          <input type="radio" name="layout" value="bottom" checked>
+          <svg viewBox="0 0 20 28" width="30" height="42">
+            <rect x=".5" y=".5" width="19" height="27" rx="1.2" fill="none" stroke="currentColor" stroke-width=".9"/>
+            <line x1="2" y1="5" x2="11" y2="6.5" stroke="currentColor" stroke-width=".7" opacity=".4"/>
+            <line x1="5" y1="8" x2="18" y2="7" stroke="currentColor" stroke-width=".6" opacity=".4"/>
+            <line x1="2" y1="11" x2="13" y2="10" stroke="currentColor" stroke-width=".5" opacity=".3"/>
+            <rect x=".5" y="15.5" width="19" height="5" fill="currentColor" opacity=".06"/>
+            <rect x="4" y="19" width="12" height="1.6" rx=".4" fill="currentColor" opacity=".65"/>
+            <rect x="6.5" y="22" width="7" height="1" rx=".3" fill="currentColor" opacity=".45"/>
+            <rect x="7.5" y="24.5" width="5" height=".8" rx=".3" fill="currentColor" opacity=".3"/>
+          </svg>
+          Bottom
+        </label>
+        <label class="layout-pill">
+          <input type="radio" name="layout" value="top">
+          <svg viewBox="0 0 20 28" width="30" height="42">
+            <rect x=".5" y=".5" width="19" height="27" rx="1.2" fill="none" stroke="currentColor" stroke-width=".9"/>
+            <rect x="4" y="3" width="12" height="1.6" rx=".4" fill="currentColor" opacity=".65"/>
+            <rect x="6.5" y="5.5" width="7" height="1" rx=".3" fill="currentColor" opacity=".45"/>
+            <rect x="7.5" y="8" width="5" height=".8" rx=".3" fill="currentColor" opacity=".3"/>
+            <rect x=".5" y="8.5" width="19" height="5" fill="currentColor" opacity=".06"/>
+            <line x1="2" y1="16" x2="11" y2="17.5" stroke="currentColor" stroke-width=".7" opacity=".4"/>
+            <line x1="5" y1="19" x2="18" y2="18" stroke="currentColor" stroke-width=".6" opacity=".4"/>
+          </svg>
+          Top
+        </label>
       </div>
-
-      <!-- Visual effects (inline — no sub-accordion) -->
-      <div class="field" style="margin-bottom:14px">
-        <label>Visual effects</label>
-        <div style="display:flex;flex-direction:column;gap:6px;margin-top:6px">
-          <label class="fx-chip">
-            <input type="checkbox" id="fx-vignette" checked>
-            <div>
-              <div class="fx-title">Vignette</div>
-              <div class="fx-desc">Darkens the edges for a polished print look</div>
-            </div>
-          </label>
-          <label class="fx-chip">
-            <input type="checkbox" id="fx-grain">
-            <div>
-              <div class="fx-title">Grain</div>
-              <div class="fx-desc">Adds a subtle paper texture — handcrafted feel</div>
-            </div>
-          </label>
-        </div>
+    </div>
+    <div class="field" id="separator-field">
+      <label>Separator</label>
+      <div class="layer-row" style="margin-top:4px">
+        <label class="layer-chip"><input type="radio" name="separator" value="line" checked>
+          <span class="sep-preview">———</span> Line</label>
+        <label class="layer-chip"><input type="radio" name="separator" value="double">
+          <span class="sep-preview" style="font-size:.7rem;line-height:1.2;letter-spacing:1px">══</span> Double</label>
+        <label class="layer-chip"><input type="radio" name="separator" value="dots">
+          <span class="sep-preview" style="letter-spacing:3px">···</span> Dots</label>
       </div>
-
-      <!-- Sub: Text & layout -->
-      <details class="sub">
-        <summary>Text &amp; layout</summary>
-        <div class="sub-body">
-          <div class="field">
-            <label for="tagline">Tagline <span style="font-weight:400;color:var(--muted)">(optional)</span></label>
-            <input id="tagline" type="text" placeholder='e.g. "The City of Lights"'
-                   style="font-size:.85rem;font-style:italic">
-            <div class="hint">A short subtitle printed below the country name on the poster.</div>
-          </div>
-          <label class="fx-chip">
-            <input type="checkbox" id="show-country" checked onchange="toggleSeparator()">
-            <div>
-              <div class="fx-title">Show country name</div>
-              <div class="fx-desc">Uncheck to remove the country label from the poster</div>
-            </div>
-          </label>
-          <label class="fx-chip">
-            <input type="checkbox" id="show-coords" checked>
-            <div>
-              <div class="fx-title">Show coordinates</div>
-              <div class="fx-desc">Uncheck to hide the latitude/longitude line</div>
-            </div>
-          </label>
-          <div class="field">
-            <label>Text position</label>
-            <div class="layout-row">
-              <label class="layout-pill">
-                <input type="radio" name="layout" value="bottom" checked>
-                <svg viewBox="0 0 20 28" width="30" height="42">
-                  <rect x=".5" y=".5" width="19" height="27" rx="1.2" fill="none" stroke="currentColor" stroke-width=".9"/>
-                  <line x1="2" y1="5" x2="11" y2="6.5" stroke="currentColor" stroke-width=".7" opacity=".4"/>
-                  <line x1="5" y1="8" x2="18" y2="7" stroke="currentColor" stroke-width=".6" opacity=".4"/>
-                  <line x1="2" y1="11" x2="13" y2="10" stroke="currentColor" stroke-width=".5" opacity=".3"/>
-                  <line x1="9" y1="13.5" x2="18" y2="14.5" stroke="currentColor" stroke-width=".5" opacity=".3"/>
-                  <rect x=".5" y="15.5" width="19" height="5" fill="currentColor" opacity=".06"/>
-                  <rect x="4" y="19" width="12" height="1.6" rx=".4" fill="currentColor" opacity=".65"/>
-                  <rect x="6.5" y="22" width="7" height="1" rx=".3" fill="currentColor" opacity=".45"/>
-                  <rect x="7.5" y="24.5" width="5" height=".8" rx=".3" fill="currentColor" opacity=".3"/>
-                </svg>
-                Bottom
-              </label>
-              <label class="layout-pill">
-                <input type="radio" name="layout" value="top">
-                <svg viewBox="0 0 20 28" width="30" height="42">
-                  <rect x=".5" y=".5" width="19" height="27" rx="1.2" fill="none" stroke="currentColor" stroke-width=".9"/>
-                  <rect x="4" y="3" width="12" height="1.6" rx=".4" fill="currentColor" opacity=".65"/>
-                  <rect x="6.5" y="5.5" width="7" height="1" rx=".3" fill="currentColor" opacity=".45"/>
-                  <rect x="7.5" y="8" width="5" height=".8" rx=".3" fill="currentColor" opacity=".3"/>
-                  <rect x=".5" y="8.5" width="19" height="5" fill="currentColor" opacity=".06"/>
-                  <line x1="2" y1="16" x2="11" y2="17.5" stroke="currentColor" stroke-width=".7" opacity=".4"/>
-                  <line x1="5" y1="19" x2="18" y2="18" stroke="currentColor" stroke-width=".6" opacity=".4"/>
-                  <line x1="2" y1="22" x2="13" y2="21" stroke="currentColor" stroke-width=".5" opacity=".3"/>
-                  <line x1="9" y1="24.5" x2="18" y2="25.5" stroke="currentColor" stroke-width=".5" opacity=".3"/>
-                </svg>
-                Top
-              </label>
-            </div>
-          </div>
-          <!-- Separator: hidden when "Show country" is unchecked -->
-          <div class="field" id="separator-field">
-            <label>Separator — decorative line between city and country</label>
-            <div class="layer-row" style="margin-top:4px">
-              <label class="layer-chip"><input type="radio" name="separator" value="line" checked>
-                <span class="sep-preview">———</span> Line</label>
-              <label class="layer-chip"><input type="radio" name="separator" value="double">
-                <span class="sep-preview" style="font-size:.7rem;line-height:1.2;letter-spacing:1px">══</span> Double</label>
-              <label class="layer-chip"><input type="radio" name="separator" value="dots">
-                <span class="sep-preview" style="letter-spacing:3px">···</span> Dots</label>
-            </div>
-          </div>
-        </div>
-      </details>
-
+    </div>
+    <label class="fx-chip">
+      <input type="checkbox" id="show-country" checked onchange="toggleSeparator()">
+      <div><div class="fx-title">Show country</div></div>
+    </label>
+    <label class="fx-chip">
+      <input type="checkbox" id="show-coords" checked>
+      <div><div class="fx-title">Show coordinates</div></div>
+    </label>
+    <div class="field">
+      <label for="tagline">Tagline <span style="font-weight:400;color:var(--muted)">(optional)</span></label>
+      <input id="tagline" type="text" placeholder='e.g. "The City of Lights"'
+             style="font-size:.85rem;font-style:italic">
+    </div>
+    <div class="section-label">i18n / Custom labels</div>
+    <div class="field">
+      <label for="display_city">City label</label>
+      <input id="display_city" type="text" placeholder="e.g. 東京 for Tokyo">
+    </div>
+    <div class="field">
+      <label for="display_country">Country label</label>
+      <input id="display_country" type="text" placeholder="e.g. 日本 for Japan">
+    </div>
+    <div class="field">
+      <label for="font_family">Google Font</label>
+      <input id="font_family" type="text" placeholder="e.g. Noto Sans JP">
+      <div class="hint">Leave blank for default Roboto.</div>
+    </div>
+    <div style="margin-top:auto;padding-top:8px">
+      <button class="btn btn-p" onclick="generate(false)">Generate Poster</button>
     </div>
   </div>
 
-  <!-- ── EXPORT ── (always visible) -->
-  <div>
-    <div class="section-label">Export</div>
-    <div style="display:flex;flex-direction:column;gap:10px;margin-top:8px">
-      <div class="field">
-        <label>Paper format</label>
-        <div class="fmt-row" style="margin-top:4px">
-          <span class="fmt-chip" data-fmt="A4" onclick="setFormatPreset('A4',8.27,11.69)">
-            A4<span class="fmt-sub">21×30 cm</span>
-          </span>
-          <span class="fmt-chip" data-fmt="A3" onclick="setFormatPreset('A3',11.69,16.54)">
-            A3<span class="fmt-sub">30×42 cm</span>
-          </span>
-          <span class="fmt-chip" data-fmt="A2" onclick="setFormatPreset('A2',16.54,23.39)">
-            A2<span class="fmt-sub">42×59 cm</span>
-          </span>
-          <span class="fmt-chip active" data-fmt="custom" onclick="setFormatPreset('custom',0,0)">
-            Custom
-          </span>
-        </div>
-      </div>
-      <div id="custom-dims" class="row">
-        <div class="field"><label for="width">Width (inches)</label>
-          <input id="width" type="number" value="12" min="4" max="20" step="0.5"></div>
-        <div class="field"><label for="height">Height (inches)</label>
-          <input id="height" type="number" value="16" min="4" max="20" step="0.5"></div>
-      </div>
-      <div class="row">
-        <div class="field"><label for="format">File format</label>
-          <select id="format">
-            <option value="png" selected>PNG — standard image</option>
-            <option value="svg">SVG — scalable vector</option>
-            <option value="pdf">PDF — ready to print</option>
-          </select>
-        </div>
-        <div class="field"><label for="dpi">Resolution</label>
-          <select id="dpi" onchange="updateDpiHint()">
-            <option value="150">Apercu rapide</option>
-            <option value="300" selected>Standard</option>
-            <option value="600">Grand format</option>
-            <option value="900">Ultra HD</option>
-          </select>
-          <div id="dpi-hint" class="hint"></div>
-        </div>
+  <!-- ══ EXPORT ══ -->
+  <div class="panel" data-tab="export">
+    <div class="panel-title">Export</div>
+    <div class="field">
+      <label>Paper format</label>
+      <div class="fmt-row" style="margin-top:4px">
+        <span class="fmt-chip" data-fmt="A4" onclick="setFormatPreset('A4',8.27,11.69)">
+          A4<span class="fmt-sub">21×30 cm</span>
+        </span>
+        <span class="fmt-chip" data-fmt="A3" onclick="setFormatPreset('A3',11.69,16.54)">
+          A3<span class="fmt-sub">30×42 cm</span>
+        </span>
+        <span class="fmt-chip" data-fmt="A2" onclick="setFormatPreset('A2',16.54,23.39)">
+          A2<span class="fmt-sub">42×59 cm</span>
+        </span>
+        <span class="fmt-chip active" data-fmt="custom" onclick="setFormatPreset('custom',0,0)">
+          Custom
+        </span>
       </div>
     </div>
-  </div>
-
-  <!-- ── CUSTOMIZATION (collapsed) ── -->
-  <details class="adv">
-    <summary>Customization</summary>
-    <div class="adv-body">
-      <div class="field">
-        <label for="display_city">Custom city label <span style="font-weight:400;color:var(--muted)">(for non-Latin scripts)</span></label>
-        <input id="display_city" type="text" placeholder="e.g. 東京 for Tokyo">
-        <div class="hint">Overrides the city text printed on the poster.</div>
-      </div>
-      <div class="field">
-        <label for="display_country">Custom country label</label>
-        <input id="display_country" type="text" placeholder="e.g. 日本 for Japan">
-      </div>
-      <div class="field">
-        <label for="font_family">Google Font</label>
-        <input id="font_family" type="text" placeholder="e.g. Noto Sans JP">
-        <div class="hint">Font family name from Google Fonts. Leave blank for the default Roboto.</div>
-      </div>
+    <div id="custom-dims" class="row">
+      <div class="field"><label for="width">Width (inches)</label>
+        <input id="width" type="number" value="12" min="4" max="20" step="0.5"></div>
+      <div class="field"><label for="height">Height (inches)</label>
+        <input id="height" type="number" value="16" min="4" max="20" step="0.5"></div>
     </div>
-  </details>
-
-  <!-- Actions -->
-  <div style="margin-top:auto;display:flex;flex-direction:column;gap:8px;padding-top:4px">
-    <button class="btn btn-p" id="btn-gen" onclick="generate(false)">Generate Poster</button>
-    <button class="btn btn-s" id="btn-all" onclick="generate(true)">Generate All Themes</button>
-    <div class="hint" style="text-align:center">Ctrl+Enter to generate</div>
+    <div class="field"><label for="format">File format</label>
+      <select id="format">
+        <option value="png" selected>PNG — standard image</option>
+        <option value="svg">SVG — scalable vector</option>
+        <option value="pdf">PDF — ready to print</option>
+      </select>
+    </div>
+    <div class="field"><label for="dpi">Resolution</label>
+      <select id="dpi" onchange="updateDpiHint()">
+        <option value="150">Apercu rapide</option>
+        <option value="300" selected>Standard</option>
+        <option value="600">Grand format</option>
+      </select>
+      <div id="dpi-hint" class="hint"></div>
+    </div>
+    <div style="margin-top:auto;padding-top:8px">
+      <button class="btn btn-p" onclick="generate(false)">Generate Poster</button>
+    </div>
   </div>
 
 </aside>
@@ -773,6 +769,14 @@ details.sub .sub-body{display:flex;flex-direction:column;gap:12px;padding-bottom
 
 <script>
 const T = {{ themes | tojson }};
+
+/* Tab switching */
+function switchTab(name) {
+  document.querySelectorAll('.panel').forEach(p => p.classList.toggle('active', p.dataset.tab === name));
+  document.querySelectorAll('.tab-btn[onclick]').forEach(b => {
+    b.classList.toggle('active', b.getAttribute('onclick').includes("'" + name + "'"));
+  });
+}
 
 /* Toast */
 function toast(msg, type='info', ms=4000) {
@@ -911,10 +915,10 @@ async function generate(allThemes) {
     all_themes: allThemes,
   };
 
+  const allBtns = document.querySelectorAll('.btn-p, .btn-s');
+  allBtns.forEach(b => b.disabled = true);
   const btnGen = document.getElementById('btn-gen');
-  const btnAll = document.getElementById('btn-all');
-  btnGen.disabled = btnAll.disabled = true;
-  btnGen.innerHTML = '<span class="spin"></span> Generating…';
+  if (btnGen) btnGen.innerHTML = '<span class="spin"></span> Generating…';
 
   const fill = document.getElementById('prog-fill');
   const progText = document.getElementById('prog-text');
@@ -941,8 +945,8 @@ async function generate(allThemes) {
     progText.textContent = 'Network error: ' + e.message;
     toast('Network error: ' + e.message, 'err');
   } finally {
-    btnGen.disabled = btnAll.disabled = false;
-    btnGen.innerHTML = 'Generate Poster';
+    allBtns.forEach(b => b.disabled = false);
+    if (btnGen) btnGen.innerHTML = 'Generate Poster';
   }
 }
 

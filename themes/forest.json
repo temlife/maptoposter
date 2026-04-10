@@ -11,5 +11,11 @@
   "road_secondary": "#5A8A70",
   "road_tertiary": "#7AAA90",
   "road_residential": "#A0C8B0",
-  "road_default": "#7AAA90"
+  "road_default": "#7AAA90",
+  "waterways": "#B8D4D4",
+  "forests": "#C0D8C0",
+  "beaches": "#E0DCD0",
+  "water_edge": "#98BCB8",
+  "buildings": "#E0E8E0",
+  "railways": "#2D4A3E"
 }
