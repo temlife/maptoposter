@@ -8,6 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased] - Community Contributions
 
 ### Added
+- **Resolution presets** - `--dpi` CLI flag (default 300) for controlling output resolution
+  - GUI: 4 named presets (Apercu rapide 150, Standard 300, Grand format 600, Ultra HD 900) with dynamic pixel count display
+  - Enables large format printing (60x80cm+) and 8K+ digital output
 - **uv package manager support** ([PR #20](https://github.com/originalankur/maptoposter/pull/20))
   - Added `pyproject.toml` with project metadata and dependencies
   - Added `uv.lock` for reproducible builds

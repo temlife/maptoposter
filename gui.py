@@ -706,10 +706,13 @@ details.sub .sub-body{display:flex;flex-direction:column;gap:12px;padding-bottom
           </select>
         </div>
         <div class="field"><label for="dpi">Resolution</label>
-          <select id="dpi">
-            <option value="150">Fast preview (150 dpi)</option>
-            <option value="300" selected>Print quality (300 dpi)</option>
+          <select id="dpi" onchange="updateDpiHint()">
+            <option value="150">Apercu rapide</option>
+            <option value="300" selected>Standard</option>
+            <option value="600">Grand format</option>
+            <option value="900">Ultra HD</option>
           </select>
+          <div id="dpi-hint" class="hint"></div>
         </div>
       </div>
     </div>
@@ -795,7 +798,24 @@ function setFormatPreset(name, w, h) {
     document.getElementById('height').value = h;
     customDims.style.display = 'none';
   }
+  updateDpiHint();
 }
+
+/* DPI preset hint */
+function updateDpiHint() {
+  const dpi = parseInt(document.getElementById('dpi').value);
+  const w = parseFloat(document.getElementById('width').value) || 12;
+  const h = parseFloat(document.getElementById('height').value) || 16;
+  const px_w = Math.round(w * dpi);
+  const px_h = Math.round(h * dpi);
+  const hint = document.getElementById('dpi-hint');
+  let text = px_w + ' \u00d7 ' + px_h + ' px';
+  if (dpi >= 600) text += ' \u2014 la g\u00e9n\u00e9ration sera plus longue';
+  hint.textContent = text;
+}
+document.getElementById('width').addEventListener('input', updateDpiHint);
+document.getElementById('height').addEventListener('input', updateDpiHint);
+updateDpiHint();
 
 /* Radius slider */
 const distSlider = document.getElementById('distance');

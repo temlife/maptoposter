@@ -1137,6 +1137,12 @@ Examples:
         help="Output format for the poster (default: png)",
     )
     parser.add_argument(
+        "--dpi",
+        type=int,
+        default=300,
+        help="Resolution in DPI (default: 300). Higher values produce larger files.",
+    )
+    parser.add_argument(
         "--layers",
         nargs="+",
         default=None,
@@ -1234,6 +1240,7 @@ Examples:
                     theme=t,
                     prefetched=prefetched,
                     layers=cli_layers,
+                    dpi=args.dpi,
                 )
                 return out
 
@@ -1259,6 +1266,7 @@ Examples:
                 fonts=custom_fonts,
                 theme=THEME,
                 layers=cli_layers,
+                dpi=args.dpi,
             )
 
         print("\n" + "=" * 50)

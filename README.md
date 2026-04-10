@@ -79,6 +79,7 @@ python create_map_poster.py --city <city> --country <country> [options]
 | **OPTIONAL:** `--all-themes` | | Generate posters for all available themes | |
 | **OPTIONAL:** `--width` | `-W` | Image width in inches | 12 (max: 20) |
 | **OPTIONAL:** `--height` | `-H` | Image height in inches | 16 (max: 20) |
+| **OPTIONAL:** `--dpi` | | Resolution in DPI | 300 |
 
 ### Multilingual Support - i18n
 
@@ -105,17 +106,41 @@ python create_map_poster.py -c "Dubai" -C "UAE" -dc "دبي" -dC "الإمارا
 
 **Note**: Fonts are automatically downloaded from Google Fonts and cached locally in `fonts/cache/`.
 
-### Resolution Guide (300 DPI)
+### Resolution Presets
 
-Use these values for `-W` and `-H` to target specific resolutions:
+The `--dpi` flag controls output resolution. Higher DPI produces larger, more detailed files at the cost of longer generation time.
 
-| Target | Resolution (px) | Inches (-W / -H) |
-|--------|-----------------|------------------|
-| **Instagram Post** | 1080 x 1080 | 3.6 x 3.6 |
-| **Mobile Wallpaper** | 1080 x 1920 | 3.6 x 6.4 |
-| **HD Wallpaper** | 1920 x 1080 | 6.4 x 3.6 |
-| **4K Wallpaper** | 3840 x 2160 | 12.8 x 7.2 |
-| **A4 Print** | 2480 x 3508 | 8.3 x 11.7 |
+| Preset (GUI) | DPI | Result at 12"x16" | Use case |
+|--------------|-----|---------------------|----------|
+| Apercu rapide | 150 | 1800 x 2400 px | Quick preview |
+| Standard | 300 | 3600 x 4800 px | A3/A4 printing |
+| Grand format | 600 | 7200 x 9600 px | Large posters (60x80cm+) |
+| Ultra HD | 900 | 10800 x 14400 px | 8K+ / very large prints |
+
+```bash
+# Standard print quality (default)
+python create_map_poster.py -c "Paris" -C "France"
+
+# Large format poster
+python create_map_poster.py -c "Paris" -C "France" --dpi 600
+
+# Ultra high resolution for 8K display
+python create_map_poster.py -c "Paris" -C "France" --dpi 900
+```
+
+### Dimension Guide
+
+Use `-W`, `-H` and `--dpi` together to target specific pixel resolutions:
+
+| Target | Resolution (px) | Inches (-W / -H) | DPI |
+|--------|-----------------|-------------------|-----|
+| **Instagram Post** | 1080 x 1080 | 3.6 x 3.6 | 300 |
+| **Mobile Wallpaper** | 1080 x 1920 | 3.6 x 6.4 | 300 |
+| **HD Wallpaper** | 1920 x 1080 | 6.4 x 3.6 | 300 |
+| **4K Wallpaper** | 3840 x 2160 | 12.8 x 7.2 | 300 |
+| **8K Wallpaper** | 7680 x 4320 | 12.8 x 7.2 | 600 |
+| **A4 Print** | 2480 x 3508 | 8.3 x 11.7 | 300 |
+| **60x80cm Poster** | 7087 x 9449 | 12 x 16 | 600 |
 
 ### Usage Examples
 
@@ -396,4 +421,4 @@ G = ox.graph_from_point(point, dist=dist, network_type='walk')   # pedestrian
 - Large `dist` values (>20km) = slow downloads + memory heavy
 - Cache coordinates locally to avoid Nominatim rate limits
 - Use `network_type='drive'` instead of `'all'` for faster renders
-- Reduce `dpi` from 300 to 150 for quick previews
+- Use `--dpi 150` for quick previews, `--dpi 600` or `900` only when needed (large files, slow rendering)
